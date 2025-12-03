@@ -1,7 +1,7 @@
 {
   "name": "discord-time-bot",
-  "version": "1.0.0",
-  "description": "Bot de control de tiempo",
+  "version": "2.0.0",
+  "description": "Bot Profesional de Tiempos",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
@@ -10,7 +10,8 @@
     "discord.js": "^14.11.0",
     "express": "^4.18.2",
     "moment": "^2.29.4",
-    "moment-duration-format": "^2.3.2"
+    "moment-duration-format": "^2.3.2",
+    "moment-timezone": "^0.5.43"
   },
   "engines": {
     "node": ">=16.9.0"
