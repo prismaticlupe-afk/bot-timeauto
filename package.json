@@ -1,0 +1,18 @@
+{
+  "name": "discord-time-bot",
+  "version": "1.0.0",
+  "description": "Bot de control de tiempo",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.11.0",
+    "express": "^4.18.2",
+    "moment": "^2.29.4",
+    "moment-duration-format": "^2.3.2"
+  },
+  "engines": {
+    "node": ">=16.9.0"
+  }
+}
