@@ -1,7 +1,7 @@
 {
-  "name": "discord-time-bot",
-  "version": "2.0.0",
-  "description": "Bot Profesional de Tiempos",
+  "name": "discord-time-bot-ultimate",
+  "version": "3.1.0",
+  "description": "Bot de control de tiempos con lectura de logs",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
