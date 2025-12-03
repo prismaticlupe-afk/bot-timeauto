@@ -1,274 +1,367 @@
 const { 
     Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, 
     ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, 
-    TextInputStyle, PermissionsBitField 
+    TextInputStyle, StringSelectMenuBuilder, RoleSelectMenuBuilder, 
+    PermissionsBitField 
 } = require('discord.js');
 const express = require('express');
 const moment = require('moment');
+const fs = require('fs');
 require('moment-duration-format');
 const momentTimezone = require('moment-timezone');
 
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot de Tiempos Premium Activo.'));
+app.get('/', (req, res) => res.send('Bot Lector de Logs Activo.'));
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
+    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const activeSessions = new Map();
-const cooldowns = new Map();
-const guildConfigs = new Map();
+const DB_FILE = './data.json';
+let db = { 
+    config: {},   // { guildId: { dashId, logId, timezone, adminRoles, autoCut: {day, hour} } }
+    sessions: {}, // { userId: { start, guildId, startMsgId } }
+    frozen: {}    // { guildId: boolean }
+};
+
+if (fs.existsSync(DB_FILE)) {
+    try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) { console.error("Error DB", e); }
+}
+function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
+
+const TIMEZONES = [
+    { label: '🇲🇽 México (Centro)', value: 'America/Mexico_City' },
+    { label: '🇨🇴/🇵🇪 Colombia/Perú', value: 'America/Bogota' },
+    { label: '🇦🇷/🇨🇱 Argentina/Chile', value: 'America/Argentina/Buenos_Aires' },
+    { label: '🇻🇪 Venezuela', value: 'America/Caracas' },
+    { label: '🇪🇸 España', value: 'Europe/Madrid' },
+    { label: '🇺🇸 USA (New York)', value: 'America/New_York' },
+    { label: '🇺🇸 USA (Los Angeles)', value: 'America/Los_Angeles' }
+];
 
 client.on('ready', () => {
-    console.log(`💎 Bot conectado como ${client.user.tag}`);
+    console.log(`🤖 Bot conectado como ${client.user.tag}`);
+    setInterval(checkAutoSchedules, 60000); 
 });
 
-async function emergencyShutdown() {
-    console.log("🚨 REINICIO DETECTADO: Cerrando tiempos...");
-    const now = Date.now();
+async function calculateTotalFromLogs(guildId, userId, logChannelId) {
+    const channel = await client.channels.fetch(logChannelId).catch(() => null);
+    if (!channel) return 0;
 
-    const sessionsByGuild = {};
+    let totalMs = 0;
+    let keepScanning = true;
+    let lastId = undefined;
     
-    for (const [userId, data] of activeSessions.entries()) {
-        if (!sessionsByGuild[data.guildId]) sessionsByGuild[data.guildId] = [];
-        sessionsByGuild[data.guildId].push({ userId, startTime: data.startTime });
-    }
+ 
+    let loops = 0;
 
-    for (const [guildId, sessions] of Object.entries(sessionsByGuild)) {
-        const config = guildConfigs.get(guildId);
-        if (!config) continue; // Si no hay config, no podemos loguear
+    while (keepScanning && loops < 5) {
+        const messages = await channel.messages.fetch({ limit: 100, before: lastId });
+        if (messages.size === 0) break;
 
-        const logChannel = await client.channels.fetch(config.logId).catch(() => null);
-        
-        if (logChannel) {
-            let description = "**⚠️ Times cerrados por reinicio del servidor.**\nEn breve se activará la toma de times nuevamente.\n\n**Resumen de cierres automáticos:**\n";
-            
-            sessions.forEach(session => {
-                const durationMs = now - session.startTime;
-                const duration = moment.duration(durationMs).format("h [h], m [min], s [seg]");
-                description += `> 👤 <@${session.userId}> | ⏳ **${duration}**\n`;
-            });
+        for (const msg of messages.values()) {
+            if (msg.content.includes("✂️ CORTE DE CAJA")) {
+                keepScanning = false;
+                break; 
+            }
 
-            const embed = new EmbedBuilder()
-                .setTitle('🛑 REINICIO DEL SISTEMA')
-                .setDescription(description)
-                .setColor(0xFFA500) // Naranja
-                .setFooter({ text: 'Todos los tiempos han sido guardados.' })
-                .setTimestamp();
+            if (msg.author.id === client.user.id && msg.embeds.length > 0) {
+                const embed = msg.embeds[0];
+                
+                const userMention = `<@${userId}>`;
+                const isUserInEmbed = (embed.description && embed.description.includes(userMention)) || 
+                                      (embed.fields && embed.fields.some(f => f.value.includes(userMention)));
 
-            await logChannel.send({ embeds: [embed] });
+                if (isUserInEmbed) {
+                
+                    const timeField = embed.fields.find(f => f.name.includes("Tiempo") || f.name.includes("Duración") || f.name.includes("Sesión"));
+                    
+                    if (timeField) {
+                        const timeText = timeField.value.replace(/\*/g, '').trim(); 
+                        totalMs += parseDurationToMs(timeText);
+                    }
+                }
+            }
+            lastId = msg.id;
         }
+        loops++;
     }
-    
-    process.exit(0);
+    return totalMs;
 }
 
-process.on('SIGTERM', emergencyShutdown);
-process.on('SIGINT', emergencyShutdown);
+function parseDurationToMs(str) {
+    let ms = 0;
+    const regex = /(\d+)\s*(h|m|s)/g;
+    let match;
+    while ((match = regex.exec(str)) !== null) {
+        const val = parseInt(match[1]);
+        const unit = match[2];
+        if (unit === 'h') ms += val * 3600000;
+        if (unit === 'm') ms += val * 60000;
+        if (unit === 's') ms += val * 1000;
+    }
+    return ms;
+}
+
 
 client.on('messageCreate', async (message) => {
     if (message.content === '!run') {
-        if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-            return message.reply('❌ Solo administradores.');
-        }
+        if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Owner puede configurar.');
 
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-                .setCustomId('btn_setup_open')
-                .setLabel('🛠️ Configurar Panel')
-                .setStyle(ButtonStyle.Primary)
+        const rowZone = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('🌎 Zona Horaria').addOptions(TIMEZONES)
+        );
+        const rowRoles = new ActionRowBuilder().addComponents(
+            new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('👮 Roles Admin (Corte/Freezer)').setMinValues(1).setMaxValues(5)
+        );
+        const rowBtn = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente').setStyle(ButtonStyle.Primary)
         );
 
-        await message.reply({ 
-            content: 'Haz clic abajo para configurar canales, horarios y zona horaria.', 
-            components: [row] 
-        });
+        await message.reply({ content: '⚙️ **Configuración:** Elige Zona y Roles Admin.', components: [rowZone, rowRoles, rowBtn] });
     }
+
+    if (message.content.startsWith('!')) handleAdminCommands(message);
 });
 
+async function handleAdminCommands(message) {
+    const guildId = message.guild.id;
+    const config = db.config[guildId];
+    if (!config) return;
+
+    const isAdmin = message.member.roles.cache.some(r => config.adminRoles.includes(r.id)) || message.author.id === message.guild.ownerId;
+    if (!isAdmin && message.content.startsWith('!')) return; // Silencioso si no es admin
+
+    if (message.content === '!freezer') {
+        db.frozen[guildId] = true;
+        saveDB();
+        message.reply('❄️ **Sistema CONGELADO.**');
+        updateDashboardMSG(guildId);
+    }
+    if (message.content === '!unfreezer') {
+        db.frozen[guildId] = false;
+        saveDB();
+        message.reply('🔥 **Sistema ACTIVADO.**');
+        updateDashboardMSG(guildId);
+    }
+    if (message.content === '!corte') {
+      
+        const logChannel = await client.channels.fetch(config.logId).catch(()=>null);
+        if (logChannel) {
+            await logChannel.send('✂️ CORTE DE CAJA | -----------------------------------');
+            await logChannel.send(`> *El conteo de horas se ha reiniciado desde este punto por: ${message.author}*`);
+            message.reply('✅ **Corte Realizado.** El historial de horas acumuladas se reiniciará desde ahora.');
+        } else {
+            message.reply('❌ Error: No encuentro el canal de logs.');
+        }
+    }
+}
+
+const tempSetup = new Map();
+
 client.on('interactionCreate', async (interaction) => {
-    
-    if (interaction.isButton() && interaction.customId === 'btn_setup_open') {
-        const modal = new ModalBuilder().setCustomId('setup_modal').setTitle('Configuración del Sistema');
+    if (interaction.isStringSelectMenu() && interaction.customId === 'setup_zone') {
+        const cur = tempSetup.get(interaction.guild.id) || {};
+        cur.timezone = interaction.values[0];
+        tempSetup.set(interaction.guild.id, cur);
+        await interaction.deferUpdate();
+    }
+    if (interaction.isRoleSelectMenu() && interaction.customId === 'setup_roles') {
+        const cur = tempSetup.get(interaction.guild.id) || {};
+        cur.adminRoles = interaction.values;
+        tempSetup.set(interaction.guild.id, cur);
+        await interaction.deferUpdate();
+    }
+    if (interaction.isButton() && interaction.customId === 'btn_continue_setup') {
+        const cur = tempSetup.get(interaction.guild.id);
+        if (!cur || !cur.timezone || !cur.adminRoles) return interaction.reply({content:'⚠️ Selecciona Zona y Roles primero.', ephemeral:true});
 
-        const inputDash = new TextInputBuilder()
-            .setCustomId('inp_dash').setLabel("ID Canal Botones").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 144563...');
-        
-        const inputLog = new TextInputBuilder()
-            .setCustomId('inp_log').setLabel("ID Canal Logs").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 144563...');
-
-        const inputZone = new TextInputBuilder()
-            .setCustomId('inp_zone').setLabel("Zona Horaria (Ej: America/Mexico_City)").setStyle(TextInputStyle.Short).setRequired(true).setValue('America/Mexico_City');
-
-        const inputHorario = new TextInputBuilder()
-            .setCustomId('inp_sched').setLabel("Horario (Ej: 08-20) o escribe 'NO'").setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('Ej: 09-18 para 9am a 6pm, o NO');
-
+        const modal = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Configuración Final');
         modal.addComponents(
-            new ActionRowBuilder().addComponents(inputDash),
-            new ActionRowBuilder().addComponents(inputLog),
-            new ActionRowBuilder().addComponents(inputZone),
-            new ActionRowBuilder().addComponents(inputHorario)
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID Canal Panel").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID Canal Logs").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Auto-Cierre (Ej: Domingo 20:00)").setStyle(TextInputStyle.Short).setRequired(false))
         );
-
         await interaction.showModal(modal);
     }
+    if (interaction.isModalSubmit() && interaction.customId === 'setup_modal_final') {
+        const dashId = interaction.fields.getTextInputValue('dash');
+        const logId = interaction.fields.getTextInputValue('log');
+        const autoRaw = interaction.fields.getTextInputValue('auto');
+        const pre = tempSetup.get(interaction.guild.id);
 
-    if (interaction.isModalSubmit() && interaction.customId === 'setup_modal') {
-        const dashId = interaction.fields.getTextInputValue('inp_dash');
-        const logId = interaction.fields.getTextInputValue('inp_log');
-        const zone = interaction.fields.getTextInputValue('inp_zone');
-        const schedRaw = interaction.fields.getTextInputValue('inp_sched');
-
-        const dashCh = await interaction.guild.channels.fetch(dashId).catch(()=>null);
-        const logCh = await interaction.guild.channels.fetch(logId).catch(()=>null);
-        if (!dashCh || !logCh) return interaction.reply({content: '❌ IDs de canal inválidos.', ephemeral:true});
-
-        let schedule = null;
-        if (schedRaw.toUpperCase() !== 'NO') {
-            const parts = schedRaw.split('-');
-            if (parts.length === 2) {
-                schedule = { start: parseInt(parts[0]), end: parseInt(parts[1]) };
-            }
+        let autoCut = null;
+        if (autoRaw && autoRaw.includes(' ')) {
+            const p = autoRaw.split(' ');
+            autoCut = { day: p[0], time: p[1] };
         }
 
-        guildConfigs.set(interaction.guild.id, {
-            dashboardId: dashId,
-            logId: logId,
-            timezone: zone,
-            schedule: schedule
-        });
-
-        const embed = new EmbedBuilder()
-            .setTitle('⏱️ Control de Asistencia')
-            .setDescription(`**Estado:** Sistema Operativo\n**Zona Horaria:** ${zone}\n**Horario:** ${schedule ? `${schedule.start}:00 - ${schedule.end}:00` : '24/7'}`)
-            .setColor(0x5865F2) // Blurple Discord
-            .addFields({ name: '👥 Usuarios en Turno', value: '```\nNadie por ahora\n```' })
-            .setFooter({ text: 'Sistema de Fichaje Profesional' });
-
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_start').setLabel('🟢 Entrar').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('btn_stop').setLabel('🔴 Salir').setStyle(ButtonStyle.Danger)
-        );
-
-        await dashCh.send({ embeds: [embed], components: [row] });
-        await interaction.reply({ content: '✅ Configuración guardada y panel enviado.', ephemeral: true });
+        db.config[interaction.guild.id] = { dashId, logId, timezone: pre.timezone, adminRoles: pre.adminRoles, autoCut };
+        saveDB();
+        
+        const ch = await interaction.guild.channels.fetch(dashId).catch(()=>null);
+        if (ch) sendDashboard(ch, interaction.guild.id);
+        await interaction.reply({ content: '✅ Configurado.', ephemeral: true });
     }
 
     if (interaction.isButton() && (interaction.customId === 'btn_start' || interaction.customId === 'btn_stop')) {
         const userId = interaction.user.id;
         const guildId = interaction.guild.id;
-        const now = Date.now();
-        const config = guildConfigs.get(guildId);
+        const conf = db.config[guildId];
 
-        if (!config) return interaction.reply({ content: '⚠️ El bot se reinició. Usa `!run` para reconfigurar.', ephemeral: true });
-
-        if (interaction.customId === 'btn_start' && config.schedule) {
-            const currentHour = momentTimezone.tz(config.timezone).hour();
-            
-            if (currentHour < config.schedule.start || currentHour >= config.schedule.end) {
-                return interaction.reply({ 
-                    content: `⛔ **Oficina Cerrada**\nEl horario de fichaje es de **${config.schedule.start}:00** a **${config.schedule.end}:00** (${config.timezone}).`, 
-                    ephemeral: true 
-                });
-            }
-        }
+        if (!conf) return interaction.reply({ content: '⚠️ Bot no configurado.', ephemeral: true });
 
         if (interaction.customId === 'btn_start') {
-            if (activeSessions.has(userId)) return interaction.reply({ content: '❌ Ya tienes un turno activo.', ephemeral: true });
+            if (db.frozen[guildId]) return interaction.reply({ content: '❄️ Congelado.', ephemeral: true });
+            if (db.sessions[userId]) return interaction.reply({ content: '❌ Ya tienes turno.', ephemeral: true });
+
+            const now = Date.now();
             
-            if (cooldowns.has(userId) && now < cooldowns.get(userId)) {
-                 const expires = Math.floor(cooldowns.get(userId) / 1000);
-                 return interaction.reply({ content: `⏳ **Cooldown activo.** Espera hasta <t:${expires}:R>.`, ephemeral: true });
+            const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
+            let startMsgId = null;
+            if (logChannel) {
+                const startEmbed = new EmbedBuilder().setDescription(`🟢 <@${userId}> ha iniciado turno.`).setColor(0x57F287);
+                const m = await logChannel.send({ embeds: [startEmbed] });
+                startMsgId = m.id;
             }
 
-            activeSessions.set(userId, { startTime: now, guildId: guildId });
-            
-            const logCh = await client.channels.fetch(config.logId).catch(()=>null);
-            if(logCh) {
-                const logEmbed = new EmbedBuilder()
-                    .setTitle('🟢 Inicio de Turno')
-                    .setDescription(`**Usuario:** <@${userId}>\n**Hora:** <t:${Math.floor(now/1000)}:f>`)
-                    .setColor(0x57F287); // Verde Discord
-                logCh.send({ embeds: [logEmbed] });
-            }
-            
-            await updateDashboard(interaction, config.dashboardId);
-            return interaction.reply({ content: '✅ **Turno iniciado correctamente.** ¡Buen trabajo!', ephemeral: true });
+            db.sessions[userId] = { start: now, guildId, startMsgId };
+            saveDB();
+            updateDashboardMSG(guildId);
+            return interaction.reply({ content: '✅ Turno iniciado.', ephemeral: true });
         }
 
         if (interaction.customId === 'btn_stop') {
-            if (!activeSessions.has(userId)) return interaction.reply({ content: '❓ No has iniciado turno.', ephemeral: true });
+            if (!db.sessions[userId]) return interaction.reply({ content: '❓ No tienes turno.', ephemeral: true });
 
-            const session = activeSessions.get(userId);
-            const durationMs = now - session.startTime;
-            const duration = moment.duration(durationMs).format("h [h], m [min], s [seg]");
+            await interaction.deferReply({ ephemeral: true }); 
+            const session = db.sessions[userId];
+            const now = Date.now();
+            const currentSessionMs = now - session.start;
 
-            const userEmbed = new EmbedBuilder()
-                .setTitle('👋 Turno Finalizado')
-                .setColor(0xED4245) // Rojo
-                .addFields(
-                    { name: '⏱️ Tiempo Trabajado', value: `**${duration}**`, inline: true },
-                    { name: '📅 Inicio', value: `<t:${Math.floor(session.startTime/1000)}:t>`, inline: true },
-                    { name: '📅 Fin', value: `<t:${Math.floor(now/1000)}:t>`, inline: true }
-                );
+            const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
+            if (logChannel && session.startMsgId) {
+                try { await logChannel.messages.delete(session.startMsgId); } catch (e) {}
+            }
 
-            const logCh = await client.channels.fetch(config.logId).catch(()=>null);
-            if(logCh) {
+            const historyMs = await calculateTotalFromLogs(guildId, userId, conf.logId);
+            const totalMs = historyMs + currentSessionMs; // Histórico + Lo que acaba de hacer
+
+            const sessionStr = moment.duration(currentSessionMs).format("h[h] m[m] s[s]");
+            const totalStr = moment.duration(totalMs).format("h[h] m[m]");
+
+            if (logChannel) {
                 const logEmbed = new EmbedBuilder()
                     .setTitle('📕 Registro de Turno')
-                    .setThumbnail(interaction.user.displayAvatarURL()) // Foto del usuario
+                    .setThumbnail(interaction.user.displayAvatarURL())
                     .setColor(0xED4245)
                     .addFields(
                         { name: '👤 Usuario', value: `<@${userId}>`, inline: true },
-                        { name: '⏳ Duración', value: `**${duration}**`, inline: true },
-                        { name: 'clock', value: ' ', inline: false }, // Separador
-                        { name: '🟢 Entrada', value: `<t:${Math.floor(session.startTime/1000)}:F>`, inline: true },
-                        { name: '🔴 Salida', value: `<t:${Math.floor(now/1000)}:F>`, inline: true }
+                        { name: '⏱️ Sesión', value: `**${sessionStr}**`, inline: true },
+                        { name: '📚 Total Acumulado', value: `**${totalStr}**`, inline: true }, // ESTE ES EL DATO CLAVE
+                        { name: '📅 Inicio', value: `<t:${Math.floor(session.start/1000)}:t>`, inline: true },
+                        { name: '📅 Fin', value: `<t:${Math.floor(now/1000)}:t>`, inline: true }
                     )
-                    .setFooter({ text: 'Registro automático' })
                     .setTimestamp();
-                await logCh.send({ embeds: [logEmbed] });
+                await logChannel.send({ embeds: [logEmbed] });
             }
 
-            activeSessions.delete(userId);
-            cooldowns.set(userId, now + (10*60*1000)); // 10 min cooldown
-            await updateDashboard(interaction, config.dashboardId);
-            
-            return interaction.reply({ embeds: [userEmbed], ephemeral: true });
+            delete db.sessions[userId];
+            saveDB();
+            updateDashboardMSG(guildId);
+            return interaction.editReply(`👋 Turno cerrado.\nSesión: **${sessionStr}**\nTotal: **${totalStr}**`);
         }
     }
 });
 
-async function updateDashboard(interaction, channelId) {
-    const channel = await interaction.guild.channels.fetch(channelId).catch(()=>null);
-    if (!channel) return;
+async function checkAutoSchedules() {
+    for (const guildId in db.config) {
+        const conf = db.config[guildId];
+        if (!conf.autoCut || db.frozen[guildId]) continue; 
 
-    let list = "";
-    activeSessions.forEach((data, uId) => {
-        if (data.guildId === interaction.guild.id) {
-            list += `• <@${uId}> - <t:${Math.floor(data.startTime/1000)}:R>\n`;
+        const nowTz = momentTimezone.tz(conf.timezone);
+        const daysMap = {'domingo':'Sunday', 'lunes':'Monday', 'martes':'Tuesday', 'miercoles':'Wednesday', 'jueves':'Thursday', 'viernes':'Friday', 'sabado':'Saturday'};
+        const dayInput = conf.autoCut.day.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Quitar acentos
+        const targetDayEng = daysMap[dayInput];
+        
+        if (nowTz.format('dddd') === targetDayEng && nowTz.format('HH:mm') === conf.autoCut.time) {
+            db.frozen[guildId] = true;
+            await closeAllSessions(guildId);
+            const ch = await client.channels.fetch(conf.logId).catch(()=>null);
+            if (ch) ch.send('🤖 **AUTO-CORTE:** Sistema congelado y turnos cerrados por horario.');
+            updateDashboardMSG(guildId);
+            saveDB();
         }
-    });
-
-    if (list === "") list = "```\nNadie por ahora\n```";
-
-    const config = guildConfigs.get(interaction.guild.id);
-    const embed = new EmbedBuilder()
-        .setTitle('⏱️ Control de Asistencia')
-        .setDescription(`**Estado:** Sistema Operativo\n**Zona Horaria:** ${config.timezone}\n**Horario:** ${config.schedule ? `${config.schedule.start}:00 - ${config.schedule.end}:00` : '24/7'}`)
-        .setColor(0x5865F2)
-        .addFields({ name: '👥 Usuarios en Turno', value: list })
-        .setFooter({ text: 'Sistema de Fichaje Profesional' });
-
-    const messages = await channel.messages.fetch({ limit: 10 });
-    const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
-    if (botMsg) await botMsg.edit({ embeds: [embed] });
+    }
 }
+
+async function closeAllSessions(guildId) {
+    const conf = db.config[guildId];
+    const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
+    const now = Date.now();
+
+    for (const userId in db.sessions) {
+        if (db.sessions[userId].guildId === guildId) {
+            const session = db.sessions[userId];
+            const duration = now - session.start;
+            const durStr = moment.duration(duration).format("h[h] m[m]");
+
+            // Borrar msg inicio
+            if (logChannel && session.startMsgId) try { await logChannel.messages.delete(session.startMsgId); } catch(e){}
+
+            // Calcular acumulado rápido (opcional en cierre masivo para no saturar API)
+            // En cierre masivo, a veces es mejor solo mostrar la sesión para no tardar 10 mins calculando a 50 personas
+            if (logChannel) {
+                const embed = new EmbedBuilder()
+                    .setDescription(`⚠️ **Cierre Automático** <@${userId}>\nSesión guardada: **${durStr}**`)
+                    .setColor(0xFFA500);
+                logChannel.send({ embeds: [embed] });
+            }
+            delete db.sessions[userId];
+        }
+    }
+    saveDB();
+}
+
+async function sendDashboard(channel, guildId) {
+    const embed = new EmbedBuilder()
+        .setTitle('⏱️ Panel de Tiempos')
+        .setDescription('Sistema de Fichaje')
+        .setColor(0x5865F2)
+        .addFields({ name: 'Estado', value: db.frozen[guildId] ? '❄️ CONGELADO' : '🟢 ACTIVO' });
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_start').setLabel('Entrar').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('btn_stop').setLabel('Salir').setStyle(ButtonStyle.Danger)
+    );
+    channel.send({ embeds: [embed], components: [row] });
+}
+
+async function updateDashboardMSG(guildId) {
+    const conf = db.config[guildId];
+    if(!conf) return;
+    const ch = await client.channels.fetch(conf.dashId).catch(()=>null);
+    if(!ch) return;
+
+    let list = [];
+    for (const uid in db.sessions) {
+        if (db.sessions[uid].guildId === guildId) list.push(`• <@${uid}> (<t:${Math.floor(db.sessions[uid].start/1000)}:R>)`);
+    }
+    const embed = new EmbedBuilder()
+        .setTitle('⏱️ Panel de Tiempos')
+        .setDescription(`**Estado:** ${db.frozen[guildId] ? '❄️ CONGELADO' : '🟢 ACTIVO'}`)
+        .setColor(db.frozen[guildId] ? 0x99AAB5 : 0x5865F2)
+        .addFields({ name: 'Usuarios Activos', value: list.length ? list.join('\n') : '*Nadie*' });
+
+    const msgs = await ch.messages.fetch({ limit: 10 });
+    const botMsg = msgs.find(m => m.author.id === client.user.id && m.components.length > 0);
+    if (botMsg) botMsg.edit({ embeds: [embed] });
+}
+
+process.on('SIGTERM', async () => {
+  
+    process.exit(0);
+});
 
 client.login(process.env.DISCORD_TOKEN);
