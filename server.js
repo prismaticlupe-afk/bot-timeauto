@@ -12,7 +12,7 @@ const momentTimezone = require('moment-timezone');
 
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot Lector de Logs Activo.'));
+app.get('/', (req, res) => res.send('Bot V4 Admin Privado Activo.'));
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 const client = new Client({
@@ -20,15 +20,8 @@ const client = new Client({
 });
 
 const DB_FILE = './data.json';
-let db = { 
-    config: {},   // { guildId: { dashId, logId, timezone, adminRoles, autoCut: {day, hour} } }
-    sessions: {}, // { userId: { start, guildId, startMsgId } }
-    frozen: {}    // { guildId: boolean }
-};
-
-if (fs.existsSync(DB_FILE)) {
-    try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) { console.error("Error DB", e); }
-}
+let db = { config: {}, sessions: {}, frozen: {} };
+if (fs.existsSync(DB_FILE)) { try { db = JSON.parse(fs.readFileSync(DB_FILE)); } catch (e) {} }
 function saveDB() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
 
 const TIMEZONES = [
@@ -37,13 +30,12 @@ const TIMEZONES = [
     { label: '🇦🇷/🇨🇱 Argentina/Chile', value: 'America/Argentina/Buenos_Aires' },
     { label: '🇻🇪 Venezuela', value: 'America/Caracas' },
     { label: '🇪🇸 España', value: 'Europe/Madrid' },
-    { label: '🇺🇸 USA (New York)', value: 'America/New_York' },
-    { label: '🇺🇸 USA (Los Angeles)', value: 'America/Los_Angeles' }
+    { label: '🇺🇸 USA (New York)', value: 'America/New_York' }
 ];
 
 client.on('ready', () => {
-    console.log(`🤖 Bot conectado como ${client.user.tag}`);
-    setInterval(checkAutoSchedules, 60000); 
+    console.log(`🤖 Bot V4 conectado: ${client.user.tag}`);
+    setInterval(checkAutoSchedules, 60000);
 });
 
 async function calculateTotalFromLogs(guildId, userId, logChannelId) {
@@ -53,31 +45,23 @@ async function calculateTotalFromLogs(guildId, userId, logChannelId) {
     let totalMs = 0;
     let keepScanning = true;
     let lastId = undefined;
-    
- 
     let loops = 0;
 
-    while (keepScanning && loops < 5) {
+    while (keepScanning && loops < 8) { // Escanea hasta ~800 mensajes atrás
         const messages = await channel.messages.fetch({ limit: 100, before: lastId });
         if (messages.size === 0) break;
 
         for (const msg of messages.values()) {
-            if (msg.content.includes("✂️ CORTE DE CAJA")) {
-                keepScanning = false;
-                break; 
-            }
+            if (msg.content.includes("✂️ CORTE DE CAJA")) { keepScanning = false; break; }
 
             if (msg.author.id === client.user.id && msg.embeds.length > 0) {
                 const embed = msg.embeds[0];
-                
                 const userMention = `<@${userId}>`;
-                const isUserInEmbed = (embed.description && embed.description.includes(userMention)) || 
-                                      (embed.fields && embed.fields.some(f => f.value.includes(userMention)));
-
-                if (isUserInEmbed) {
                 
-                    const timeField = embed.fields.find(f => f.name.includes("Tiempo") || f.name.includes("Duración") || f.name.includes("Sesión"));
-                    
+                const isUser = (embed.description?.includes(userMention)) || (embed.fields?.some(f => f.value.includes(userMention)));
+
+                if (isUser) {
+                    const timeField = embed.fields.find(f => f.name.includes("Sesión") || f.name.includes("Tiempo") || f.name.includes("Duración"));
                     if (timeField) {
                         const timeText = timeField.value.replace(/\*/g, '').trim(); 
                         totalMs += parseDurationToMs(timeText);
@@ -91,94 +75,140 @@ async function calculateTotalFromLogs(guildId, userId, logChannelId) {
     return totalMs;
 }
 
+async function clearUserLogs(logChannel, userId) {
+    let deletedCount = 0;
+    let keepScanning = true;
+    let lastId = undefined;
+    let loops = 0;
+
+    while (keepScanning && loops < 8) {
+        const messages = await logChannel.messages.fetch({ limit: 100, before: lastId });
+        if (messages.size === 0) break;
+
+        for (const msg of messages.values()) {
+            if (msg.author.id === client.user.id && msg.embeds.length > 0) {
+                const embed = msg.embeds[0];
+                const userMention = `<@${userId}>`;
+                const isUser = (embed.description?.includes(userMention)) || (embed.fields?.some(f => f.value.includes(userMention)));
+
+                if (isUser) {
+                    try {
+                        await msg.delete();
+                        deletedCount++;
+                        await new Promise(r => setTimeout(r, 500)); 
+                    } catch (e) { console.log("Error borrando msg viejo", e.message); }
+                }
+            }
+            lastId = msg.id;
+        }
+        loops++;
+    }
+    return deletedCount;
+}
+
 function parseDurationToMs(str) {
     let ms = 0;
     const regex = /(\d+)\s*(h|m|s)/g;
     let match;
     while ((match = regex.exec(str)) !== null) {
         const val = parseInt(match[1]);
-        const unit = match[2];
-        if (unit === 'h') ms += val * 3600000;
-        if (unit === 'm') ms += val * 60000;
-        if (unit === 's') ms += val * 1000;
+        if (match[2] === 'h') ms += val * 3600000;
+        if (match[2] === 'm') ms += val * 60000;
+        if (match[2] === 's') ms += val * 1000;
     }
     return ms;
 }
 
-
 client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+
     if (message.content === '!run') {
-        if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Owner puede configurar.');
+        if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Owner.');
+        
+        message.delete().catch(()=>{});
 
-        const rowZone = new ActionRowBuilder().addComponents(
-            new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('🌎 Zona Horaria').addOptions(TIMEZONES)
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Iniciar Configuración').setStyle(ButtonStyle.Secondary)
         );
-        const rowRoles = new ActionRowBuilder().addComponents(
-            new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('👮 Roles Admin (Corte/Freezer)').setMinValues(1).setMaxValues(5)
-        );
-        const rowBtn = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente').setStyle(ButtonStyle.Primary)
-        );
-
-        await message.reply({ content: '⚙️ **Configuración:** Elige Zona y Roles Admin.', components: [rowZone, rowRoles, rowBtn] });
+        
+        const msg = await message.channel.send({ content: `👋 Hola Owner. Haz clic abajo para configurar el bot en privado.`, components: [row] });
+        setTimeout(() => msg.delete().catch(()=>{}), 30000);
     }
 
-    if (message.content.startsWith('!')) handleAdminCommands(message);
+    if (message.content.startsWith('!time')) {
+        const args = message.content.split(' ');
+        const targetUser = message.mentions.users.first();
+        const config = db.config[message.guild.id];
+
+        if (!config) return message.reply('⚠️ Bot no configurado.');
+        const isAdmin = message.member.roles.cache.some(r => config.adminRoles.includes(r.id)) || message.author.id === message.guild.ownerId;
+        if (!isAdmin) return message.reply('⛔ No tienes permiso.');
+
+        if (!targetUser) return message.reply('⚠️ Debes mencionar a un usuario. Ejemplo: `!time @Juan`');
+
+        const totalMs = await calculateTotalFromLogs(message.guild.id, targetUser.id, config.logId);
+        const totalStr = moment.duration(totalMs).format("h[h] m[m]");
+
+        const embed = new EmbedBuilder()
+            .setTitle(`⏱️ Tiempo Acumulado: ${targetUser.username}`)
+            .setDescription(`El usuario lleva acumulado un total de:`)
+            .addFields({ name: 'Total', value: `**${totalStr}**` })
+            .setColor(0x5865F2);
+
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+                .setCustomId(`btn_accumulate_${targetUser.id}`) // Guardamos el ID aquí
+                .setLabel('💰 Acumular (Resetear a 0)')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('📥')
+        );
+
+        message.reply({ embeds: [embed], components: [row] });
+    }
 });
-
-async function handleAdminCommands(message) {
-    const guildId = message.guild.id;
-    const config = db.config[guildId];
-    if (!config) return;
-
-    const isAdmin = message.member.roles.cache.some(r => config.adminRoles.includes(r.id)) || message.author.id === message.guild.ownerId;
-    if (!isAdmin && message.content.startsWith('!')) return; // Silencioso si no es admin
-
-    if (message.content === '!freezer') {
-        db.frozen[guildId] = true;
-        saveDB();
-        message.reply('❄️ **Sistema CONGELADO.**');
-        updateDashboardMSG(guildId);
-    }
-    if (message.content === '!unfreezer') {
-        db.frozen[guildId] = false;
-        saveDB();
-        message.reply('🔥 **Sistema ACTIVADO.**');
-        updateDashboardMSG(guildId);
-    }
-    if (message.content === '!corte') {
-      
-        const logChannel = await client.channels.fetch(config.logId).catch(()=>null);
-        if (logChannel) {
-            await logChannel.send('✂️ CORTE DE CAJA | -----------------------------------');
-            await logChannel.send(`> *El conteo de horas se ha reiniciado desde este punto por: ${message.author}*`);
-            message.reply('✅ **Corte Realizado.** El historial de horas acumuladas se reiniciará desde ahora.');
-        } else {
-            message.reply('❌ Error: No encuentro el canal de logs.');
-        }
-    }
-}
 
 const tempSetup = new Map();
 
 client.on('interactionCreate', async (interaction) => {
+    
+    if (interaction.isButton() && interaction.customId === 'sys_setup_trigger') {
+        if (interaction.user.id !== interaction.guild.ownerId) return interaction.reply({content:'❌ Solo el Owner.', ephemeral:true});
+
+        const rowZone = new ActionRowBuilder().addComponents(
+            new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('🌎 1. Elige Zona Horaria').addOptions(TIMEZONES)
+        );
+        const rowRoles = new ActionRowBuilder().addComponents(
+            new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('👮 2. Elige Roles Admin').setMinValues(1).setMaxValues(5)
+        );
+        const rowBtn = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente Paso').setStyle(ButtonStyle.Primary)
+        );
+
+        await interaction.reply({ 
+            content: '🔧 **Panel de Configuración Privado**\nSelecciona las opciones:', 
+            components: [rowZone, rowRoles, rowBtn], 
+            ephemeral: true 
+        });
+    }
+
     if (interaction.isStringSelectMenu() && interaction.customId === 'setup_zone') {
         const cur = tempSetup.get(interaction.guild.id) || {};
         cur.timezone = interaction.values[0];
         tempSetup.set(interaction.guild.id, cur);
-        await interaction.deferUpdate();
+        await interaction.deferUpdate(); // Silencioso
     }
     if (interaction.isRoleSelectMenu() && interaction.customId === 'setup_roles') {
         const cur = tempSetup.get(interaction.guild.id) || {};
         cur.adminRoles = interaction.values;
         tempSetup.set(interaction.guild.id, cur);
-        await interaction.deferUpdate();
+        await interaction.deferUpdate(); // Silencioso
     }
+
     if (interaction.isButton() && interaction.customId === 'btn_continue_setup') {
         const cur = tempSetup.get(interaction.guild.id);
         if (!cur || !cur.timezone || !cur.adminRoles) return interaction.reply({content:'⚠️ Selecciona Zona y Roles primero.', ephemeral:true});
 
-        const modal = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Configuración Final');
+        const modal = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Canales y Horarios');
         modal.addComponents(
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID Canal Panel").setStyle(TextInputStyle.Short)),
             new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID Canal Logs").setStyle(TextInputStyle.Short)),
@@ -186,6 +216,7 @@ client.on('interactionCreate', async (interaction) => {
         );
         await interaction.showModal(modal);
     }
+
     if (interaction.isModalSubmit() && interaction.customId === 'setup_modal_final') {
         const dashId = interaction.fields.getTextInputValue('dash');
         const logId = interaction.fields.getTextInputValue('log');
@@ -203,7 +234,25 @@ client.on('interactionCreate', async (interaction) => {
         
         const ch = await interaction.guild.channels.fetch(dashId).catch(()=>null);
         if (ch) sendDashboard(ch, interaction.guild.id);
-        await interaction.reply({ content: '✅ Configurado.', ephemeral: true });
+        
+        await interaction.reply({ content: '✅ Configuración guardada en secreto. El panel público se ha enviado.', ephemeral: true });
+    }
+
+    if (interaction.isButton() && interaction.customId.startsWith('btn_accumulate_')) {
+        const targetUserId = interaction.customId.split('_')[2];
+        const config = db.config[interaction.guild.id];
+        
+        const isAdmin = interaction.member.roles.cache.some(r => config.adminRoles.includes(r.id)) || interaction.user.id === interaction.guild.ownerId;
+        if (!isAdmin) return interaction.reply({ content: '⛔ No tienes permiso para acumular/resetear.', ephemeral: true });
+
+        await interaction.reply({ content: '⏳ Procesando acumulación... Borrando logs antiguos...', ephemeral: true });
+
+        const logChannel = await client.channels.fetch(config.logId).catch(()=>null);
+        if (!logChannel) return interaction.editReply('❌ No encuentro el canal de logs.');
+
+        const count = await clearUserLogs(logChannel, targetUserId);
+
+        await interaction.editReply(`✅ **¡Acumulado Exitoso!**\nSe han borrado **${count}** registros de <@${targetUserId}>.\nSu contador ahora está en **0**.`);
     }
 
     if (interaction.isButton() && (interaction.customId === 'btn_start' || interaction.customId === 'btn_stop')) {
@@ -211,14 +260,13 @@ client.on('interactionCreate', async (interaction) => {
         const guildId = interaction.guild.id;
         const conf = db.config[guildId];
 
-        if (!conf) return interaction.reply({ content: '⚠️ Bot no configurado.', ephemeral: true });
+        if (!conf) return interaction.reply({ content: '⚠️ Error de configuración.', ephemeral: true });
 
         if (interaction.customId === 'btn_start') {
             if (db.frozen[guildId]) return interaction.reply({ content: '❄️ Congelado.', ephemeral: true });
             if (db.sessions[userId]) return interaction.reply({ content: '❌ Ya tienes turno.', ephemeral: true });
 
             const now = Date.now();
-            
             const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
             let startMsgId = null;
             if (logChannel) {
@@ -236,36 +284,44 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.customId === 'btn_stop') {
             if (!db.sessions[userId]) return interaction.reply({ content: '❓ No tienes turno.', ephemeral: true });
 
-            await interaction.deferReply({ ephemeral: true }); 
+            await interaction.deferReply({ ephemeral: true });
+
             const session = db.sessions[userId];
             const now = Date.now();
             const currentSessionMs = now - session.start;
 
             const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
-            if (logChannel && session.startMsgId) {
-                try { await logChannel.messages.delete(session.startMsgId); } catch (e) {}
-            }
+            if (logChannel && session.startMsgId) try { await logChannel.messages.delete(session.startMsgId); } catch (e) {}
 
             const historyMs = await calculateTotalFromLogs(guildId, userId, conf.logId);
-            const totalMs = historyMs + currentSessionMs; // Histórico + Lo que acaba de hacer
+            const totalMs = historyMs + currentSessionMs;
 
             const sessionStr = moment.duration(currentSessionMs).format("h[h] m[m] s[s]");
             const totalStr = moment.duration(totalMs).format("h[h] m[m]");
 
             if (logChannel) {
                 const logEmbed = new EmbedBuilder()
-                    .setTitle('📕 Registro de Turno')
+                    .setTitle('📕 Turno Cerrado')
                     .setThumbnail(interaction.user.displayAvatarURL())
                     .setColor(0xED4245)
                     .addFields(
                         { name: '👤 Usuario', value: `<@${userId}>`, inline: true },
                         { name: '⏱️ Sesión', value: `**${sessionStr}**`, inline: true },
-                        { name: '📚 Total Acumulado', value: `**${totalStr}**`, inline: true }, // ESTE ES EL DATO CLAVE
-                        { name: '📅 Inicio', value: `<t:${Math.floor(session.start/1000)}:t>`, inline: true },
-                        { name: '📅 Fin', value: `<t:${Math.floor(now/1000)}:t>`, inline: true }
+                        { name: '📚 Acumulado', value: `**${totalStr}**`, inline: true },
+                        { name: 'Inicio', value: `<t:${Math.floor(session.start/1000)}:t>`, inline: true },
+                        { name: 'Fin', value: `<t:${Math.floor(now/1000)}:t>`, inline: true }
                     )
                     .setTimestamp();
-                await logChannel.send({ embeds: [logEmbed] });
+                
+                const rowAcc = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder()
+                        .setCustomId(`btn_accumulate_${userId}`)
+                        .setLabel('Acumular / Reset')
+                        .setStyle(ButtonStyle.Secondary)
+                        .setEmoji('📥')
+                );
+
+                await logChannel.send({ embeds: [logEmbed], components: [rowAcc] });
             }
 
             delete db.sessions[userId];
@@ -279,20 +335,15 @@ client.on('interactionCreate', async (interaction) => {
 async function checkAutoSchedules() {
     for (const guildId in db.config) {
         const conf = db.config[guildId];
-        if (!conf.autoCut || db.frozen[guildId]) continue; 
-
+        if (!conf.autoCut || db.frozen[guildId]) continue;
         const nowTz = momentTimezone.tz(conf.timezone);
         const daysMap = {'domingo':'Sunday', 'lunes':'Monday', 'martes':'Tuesday', 'miercoles':'Wednesday', 'jueves':'Thursday', 'viernes':'Friday', 'sabado':'Saturday'};
-        const dayInput = conf.autoCut.day.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, ""); // Quitar acentos
-        const targetDayEng = daysMap[dayInput];
-        
-        if (nowTz.format('dddd') === targetDayEng && nowTz.format('HH:mm') === conf.autoCut.time) {
+        const dayInput = conf.autoCut.day.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        if (nowTz.format('dddd') === daysMap[dayInput] && nowTz.format('HH:mm') === conf.autoCut.time) {
             db.frozen[guildId] = true;
             await closeAllSessions(guildId);
-            const ch = await client.channels.fetch(conf.logId).catch(()=>null);
-            if (ch) ch.send('🤖 **AUTO-CORTE:** Sistema congelado y turnos cerrados por horario.');
-            updateDashboardMSG(guildId);
             saveDB();
+            updateDashboardMSG(guildId);
         }
     }
 }
@@ -300,29 +351,15 @@ async function checkAutoSchedules() {
 async function closeAllSessions(guildId) {
     const conf = db.config[guildId];
     const logChannel = await client.channels.fetch(conf.logId).catch(()=>null);
-    const now = Date.now();
-
     for (const userId in db.sessions) {
         if (db.sessions[userId].guildId === guildId) {
-            const session = db.sessions[userId];
-            const duration = now - session.start;
-            const durStr = moment.duration(duration).format("h[h] m[m]");
-
-            // Borrar msg inicio
-            if (logChannel && session.startMsgId) try { await logChannel.messages.delete(session.startMsgId); } catch(e){}
-
-            // Calcular acumulado rápido (opcional en cierre masivo para no saturar API)
-            // En cierre masivo, a veces es mejor solo mostrar la sesión para no tardar 10 mins calculando a 50 personas
             if (logChannel) {
-                const embed = new EmbedBuilder()
-                    .setDescription(`⚠️ **Cierre Automático** <@${userId}>\nSesión guardada: **${durStr}**`)
-                    .setColor(0xFFA500);
+                const embed = new EmbedBuilder().setDescription(`⚠️ **Cierre Auto** <@${userId}>`).setColor(0xFFA500);
                 logChannel.send({ embeds: [embed] });
             }
             delete db.sessions[userId];
         }
     }
-    saveDB();
 }
 
 async function sendDashboard(channel, guildId) {
@@ -343,25 +380,19 @@ async function updateDashboardMSG(guildId) {
     if(!conf) return;
     const ch = await client.channels.fetch(conf.dashId).catch(()=>null);
     if(!ch) return;
-
     let list = [];
-    for (const uid in db.sessions) {
-        if (db.sessions[uid].guildId === guildId) list.push(`• <@${uid}> (<t:${Math.floor(db.sessions[uid].start/1000)}:R>)`);
-    }
+    for (const uid in db.sessions) if (db.sessions[uid].guildId === guildId) list.push(`• <@${uid}> (<t:${Math.floor(db.sessions[uid].start/1000)}:R>)`);
+    
     const embed = new EmbedBuilder()
         .setTitle('⏱️ Panel de Tiempos')
         .setDescription(`**Estado:** ${db.frozen[guildId] ? '❄️ CONGELADO' : '🟢 ACTIVO'}`)
         .setColor(db.frozen[guildId] ? 0x99AAB5 : 0x5865F2)
         .addFields({ name: 'Usuarios Activos', value: list.length ? list.join('\n') : '*Nadie*' });
-
+    
     const msgs = await ch.messages.fetch({ limit: 10 });
     const botMsg = msgs.find(m => m.author.id === client.user.id && m.components.length > 0);
     if (botMsg) botMsg.edit({ embeds: [embed] });
 }
 
-process.on('SIGTERM', async () => {
-  
-    process.exit(0);
-});
-
+process.on('SIGTERM', () => process.exit(0));
 client.login(process.env.DISCORD_TOKEN);
