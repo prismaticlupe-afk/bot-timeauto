@@ -13,13 +13,13 @@ const momentTimezone = require('moment-timezone');
 // --- SERVIDOR WEB ---
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot V10 Auto-Restauración Activo.'));
+app.get('/', (req, res) => res.send('Bot V10.2 Explicativo Activo.'));
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 // --- CLIENTE DISCORD ---
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-    presence: { status: 'online', activities: [{ name: 'Restaurando Sesiones... 🔄', type: 3 }] }
+    presence: { status: 'online', activities: [{ name: 'Ayuda: !guia', type: 3 }] }
 });
 
 // --- MEMORIA ---
@@ -42,83 +42,56 @@ const TIMEZONES = [
 // 🚀 INICIO CON AUTO-RESTAURACIÓN
 // ==========================================
 client.on('ready', async () => {
-    console.log(`🤖 Bot V10 Conectado: ${client.user.tag}`);
-    
-    // 1. Escanear todos los servidores donde está el bot
-    console.log("🔄 Iniciando escaneo de recuperación de sesiones...");
+    console.log(`🤖 Bot Conectado: ${client.user.tag}`);
     const guilds = client.guilds.cache;
-
     for (const [guildId, guild] of guilds) {
-        // A. Recuperar Configuración del Canal
         const config = await recoverConfig(guild);
-        
-        if (config) {
-            // B. Si hay config, escanear el chat de logs para encontrar gente trabajando
-            await restoreSessionsFromChat(guild, config);
-        }
+        if (config) await restoreSessionsFromChat(guild, config);
     }
-    
-    console.log("✅ Restauración completada. Bot 100% operativo.");
-    client.user.setActivity('Vigilando Tiempos ⏱️', { type: 3 });
-
+    console.log("✅ Restauración completada.");
     setInterval(checkAutoSchedules, 60000);
 });
 
-// --- FUNCIÓN DE RESTAURACIÓN (NUEVA) ---
+// --- FUNCIÓN DE RESTAURACIÓN ---
 async function restoreSessionsFromChat(guild, config) {
     const logChannel = await guild.channels.fetch(config.logId).catch(() => null);
     if (!logChannel) return;
 
-    // Leemos los últimos 50 mensajes para ver quién se quedó abierto
     const messages = await logChannel.messages.fetch({ limit: 50 }).catch(() => null);
     if (!messages) return;
 
-    const processedUsers = new Set(); // Para no repetir usuarios
+    const processedUsers = new Set(); 
 
-    // Recorremos del más nuevo al más viejo
     for (const msg of messages.values()) {
-        // Solo mensajes del bot con embeds
         if (msg.author.id !== client.user.id || msg.embeds.length === 0) continue;
-
         const embed = msg.embeds[0];
         
-        // Intentar sacar ID del usuario del embed
         let userId = null;
-        // Buscamos mención <@123456> en descripción o campos
         const descMatch = embed.description?.match(/<@(\d+)>/);
         const fieldMatch = embed.fields?.[0]?.value?.match(/<@(\d+)>/);
         
         if (descMatch) userId = descMatch[1];
         else if (fieldMatch) userId = fieldMatch[1];
 
-        if (!userId || processedUsers.has(userId)) continue; // Si ya lo procesamos o no hay ID, pasamos
+        if (!userId || processedUsers.has(userId)) continue; 
 
-        // ANÁLISIS DE ESTADO:
         const isStart = embed.description?.includes('iniciado turno');
-        const isStop = embed.title?.includes('Cerrado') || embed.description?.includes('Cierre Auto');
-
+        
         if (isStart) {
-            // ¡ENCONTRADO! Un turno iniciado que no tiene cierre posterior.
-            // Lo restauramos en memoria.
             sessions[userId] = {
                 start: msg.createdTimestamp,
                 guildId: guild.id,
                 startMsgId: msg.id
             };
-            console.log(`♻️ Sesión restaurada para usuario ${userId} en servidor ${guild.name}`);
         }
-
-        // Marcamos usuario como procesado (ya vimos su última acción)
         processedUsers.add(userId);
     }
-
-    // Actualizamos el panel visualmente para que aparezcan los nombres
     updateDash(guild.id);
 }
 
 
 // ==========================================
-// 🛡️ SISTEMA DE SEGURIDAD Y CONFIG
+// 🛡️ SEGURIDAD Y CONFIG
 // ==========================================
 function isRateLimited(userId) {
     const now = Date.now();
@@ -130,7 +103,11 @@ function isRateLimited(userId) {
 
 async function saveConfigToChannel(guild, config) {
     const channel = await guild.channels.fetch(config.dashId).catch(() => null);
-    if (!channel) return { success: false, error: 'Canal no existe' };
+    if (!channel) return { success: false, error: 'El Canal ID Botones no existe' };
+    
+    const logCheck = await guild.channels.fetch(config.logId).catch(() => null);
+    if (!logCheck) return { success: false, error: 'El Canal ID Logs no existe' };
+
     const configString = JSON.stringify(config);
     const secretTopic = `🔒 CONFIG_BOT [${configString}] (No borrar descripción)`;
     try {
@@ -157,7 +134,7 @@ async function recoverConfig(guild) {
 }
 
 // ==========================================
-// 📊 LÓGICA
+// 📊 LÓGICA DE TIEMPO
 // ==========================================
 async function calculateTotalFromLogs(guildId, userId, logChannelId) {
     const channel = await client.channels.fetch(logChannelId).catch(() => null);
@@ -210,30 +187,32 @@ function parseDurationToMs(s){ let ms=0; const r=/(\d+)\s*(h|m|s)/g; let m; whil
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
+    // --- COMANDO GUÍA ACTUALIZADO Y EXPLÍCITO ---
     if (message.content === '!guide' || message.content === '!guia') {
         const guideEmbed = new EmbedBuilder()
-            .setTitle('📘 Guía de Configuración')
-            .setDescription('**Pasos para el Dueño:**')
+            .setTitle('📘 Manual del Bot de Asistencia')
+            .setDescription('**¿Qué es este bot?**\nEs un "Reloj Checador". Sirve para que tu equipo registre sus horas de trabajo automáticamente usando botones.')
             .setColor(0xFEE75C)
             .addFields(
-                { name: '1. Preparación', value: 'Crea canales: `#fichar` y `#logs`.\nAsegúrate que el bot tenga permiso "Gestionar Canales" en `#fichar`.' },
-                { name: '2. Instalación', value: 'Escribe `!run`. Se abrirá un menú. Elige Zona Horaria, Roles Admin y pon los IDs de los canales.' },
-                { name: '3. Uso', value: 'Los usuarios usan los botones.\nAdmins usan: `!time @User` y `!corte`.' },
-                { name: '🔋 Auto-Restauración', value: 'Si el bot se reinicia, escaneará automáticamente el chat para recuperar las sesiones abiertas.' }
-            );
+                { name: '1. ¿Cómo funciona?', value: 'El bot publicará un panel con dos botones:\n🟢 **Entrar:** Inicia el cronómetro del turno.\n🔴 **Salir:** Detiene el cronómetro y guarda el tiempo trabajado en el historial.' },
+                { name: '2. Preparar Canales', value: 'Necesitas crear 2 canales de texto:\n`#fichar` (Donde pondremos el panel con los botones).\n`#logs` (Donde se guardará el historial de horas).' },
+                { name: '3. Obtener IDs (Importante)', value: 'Para configurar, necesitas las "IDs" de esos canales:\n- Ve a Ajustes -> Avanzado -> **Activa Modo Desarrollador**.\n- Clic derecho en `#fichar` -> Copiar ID.\n- Clic derecho en `#logs` -> Copiar ID.' },
+                { name: '4. Instalación Final', value: 'Escribe `!run`. El bot te pedirá la Zona Horaria, Roles de Jefe y que pegues las IDs que copiaste en el paso anterior.' }
+            )
+            .setFooter({ text: 'Usa !run cuando tengas los canales listos.' });
         return message.reply({ embeds: [guideEmbed] });
     }
 
     if (message.content === '!help') {
-        return message.reply({ embeds: [new EmbedBuilder().setTitle('Ayuda').setColor(0x5865F2).addFields({ name: 'Comandos', value: '`!guide`, `!run`, `!time @User`, `!corte`' })] });
+        return message.reply({ embeds: [new EmbedBuilder().setTitle('Ayuda').setColor(0x5865F2).addFields({ name: 'Comandos', value: '`!guia` (Explica qué es el bot y cómo usarlo)\n`!run` (Instala el panel de botones)\n`!time @Usuario` (Ve cuánto ha trabajado alguien)\n`!corte` (Limpia el historial)' })] });
     }
 
     if (message.content === '!run') {
-        if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo Owner.');
+        if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Dueño del servidor (Owner) puede usar esto.');
         message.delete().catch(()=>{});
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Configurar').setStyle(ButtonStyle.Secondary));
-        const msg = await message.channel.send({ content: `👋 Configuración.`, components: [row] });
-        setTimeout(() => msg.delete().catch(()=>{}), 20000);
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Iniciar Instalación').setStyle(ButtonStyle.Success));
+        const msg = await message.channel.send({ content: `👋 **Menú de Instalación**\n¿Ya leíste la guía (`+`!guia`+`)?\nTen a mano las IDs de tus canales.`, components: [row] });
+        setTimeout(() => msg.delete().catch(()=>{}), 60000);
         return;
     }
 
@@ -247,26 +226,26 @@ client.on('messageCreate', async (message) => {
         const logCh = await client.channels.fetch(config.logId).catch(()=>null);
         if (logCh) {
             await logCh.send('✂️ CORTE DE CAJA | -----------------------------------');
-            await logCh.send(`> *Corte por: ${message.author}*`);
-            message.reply('✅ Corte marcado.');
+            await logCh.send(`> *Corte realizado por: ${message.author}* (El tiempo anterior ya no cuenta para el pago/reporte)`);
+            message.reply('✅ Corte marcado correctamente.');
         }
     }
 
     if (message.content.startsWith('!time')) {
         let config = localConfig[message.guild.id] || await recoverConfig(message.guild);
-        if (!config) return message.reply('⚠️ Bot no configurado. Usa `!run`.');
+        if (!config) return message.reply('⚠️ Bot no configurado.');
         const ar = config.adminRoles || [];
         const isAdm = message.member.roles.cache.some(r => ar.includes(r.id)) || message.author.id === message.guild.ownerId;
         if (!isAdm) return message.reply('⛔ Sin permiso.');
 
         const target = message.mentions.users.first();
-        if (!target) return message.reply('⚠️ Menciona usuario: `!time @Juan`');
+        if (!target) return message.reply('⚠️ Menciona al usuario: `!time @Juan`');
 
         await message.channel.sendTyping();
         const tMs = await calculateTotalFromLogs(message.guild.id, target.id, config.logId);
         const tStr = moment.duration(tMs).format("h[h] m[m]");
-        const emb = new EmbedBuilder().setTitle(`⏱️ ${target.username}`).addFields({ name: 'Acumulado', value: `**${tStr}**` }).setColor(0x5865F2);
-        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`btn_accumulate_${target.id}`).setLabel('Reset').setStyle(ButtonStyle.Success).setEmoji('📥'));
+        const emb = new EmbedBuilder().setTitle(`⏱️ Reporte: ${target.username}`).addFields({ name: 'Tiempo Acumulado', value: `**${tStr}**` }).setColor(0x5865F2);
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`btn_accumulate_${target.id}`).setLabel('Resetear a 0').setStyle(ButtonStyle.Success).setEmoji('📥'));
         await message.reply({ embeds: [emb], components: [row] });
     }
 });
@@ -277,19 +256,19 @@ client.on('messageCreate', async (message) => {
 const tempSetup = new Map();
 
 client.on('interactionCreate', async (interaction) => {
-    if (interaction.isButton() && isRateLimited(interaction.user.id)) return interaction.reply({ content: '⏳ Espera 3 segundos.', ephemeral: true });
+    if (interaction.isButton() && isRateLimited(interaction.user.id)) return interaction.reply({ content: '⏳ Espera...', ephemeral: true });
 
     if (!localConfig[interaction.guild.id] && !interaction.customId.startsWith('sys_') && !interaction.customId.startsWith('setup_')) {
         await recoverConfig(interaction.guild);
     }
 
-    // SETUP (Resumido para ahorrar espacio, lógica igual a V9)
+    // SETUP
     if (interaction.isButton() && interaction.customId === 'sys_setup_trigger') {
         if (interaction.user.id !== interaction.guild.ownerId) return interaction.reply({content:'❌ Solo Owner.', ephemeral:true});
-        const r1 = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('1. Zona Horaria').addOptions(TIMEZONES));
-        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('2. Roles Admin').setMinValues(1).setMaxValues(5));
-        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente').setStyle(ButtonStyle.Primary));
-        await interaction.reply({ content: '🔧 Configuración:', components: [r1, r2, r3], ephemeral: true });
+        const r1 = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('1. Selecciona Zona Horaria').addOptions(TIMEZONES));
+        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('2. Roles ADMIN (Jefes)').setMinValues(1).setMaxValues(5));
+        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente (Poner IDs)').setStyle(ButtonStyle.Primary));
+        await interaction.reply({ content: '🔧 **Configuración Paso 1/2**', components: [r1, r2, r3], ephemeral: true });
     }
     if (interaction.isStringSelectMenu() && interaction.customId === 'setup_zone') {
         const c = tempSetup.get(interaction.guild.id)||{}; c.timezone=interaction.values[0]; tempSetup.set(interaction.guild.id, c); await interaction.deferUpdate();
@@ -298,11 +277,12 @@ client.on('interactionCreate', async (interaction) => {
         const c = tempSetup.get(interaction.guild.id)||{}; c.adminRoles=interaction.values; tempSetup.set(interaction.guild.id, c); await interaction.deferUpdate();
     }
     if (interaction.isButton() && interaction.customId === 'btn_continue_setup') {
-        const m = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Canales');
+        const m = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Configuración de Canales');
+        // ETIQUETAS EXPLÍCITAS
         m.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID Panel").setStyle(TextInputStyle.Short)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID Logs").setStyle(TextInputStyle.Short)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Auto-Cierre").setStyle(TextInputStyle.Short).setRequired(false))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID del Canal BOTONES (Donde se ficha)").setPlaceholder("Ej: 129384...").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID del Canal HISTORIAL (Donde se guarda)").setPlaceholder("Ej: 938475...").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Auto-Cierre (Opcional)").setPlaceholder("Ej: lunes 23:59 (O dejar vacío)").setStyle(TextInputStyle.Short).setRequired(false))
         );
         await interaction.showModal(m);
     }
@@ -311,14 +291,14 @@ client.on('interactionCreate', async (interaction) => {
         const logId = interaction.fields.getTextInputValue('log');
         const autoRaw = interaction.fields.getTextInputValue('auto');
         const pre = tempSetup.get(interaction.guild.id);
-        if(!pre || !pre.timezone) return interaction.reply({content:'⚠️ Faltan datos.', ephemeral:true});
+        if(!pre || !pre.timezone) return interaction.reply({content:'⚠️ Faltó seleccionar la Zona Horaria.', ephemeral:true});
         let autoCut = null; if (autoRaw && autoRaw.includes(' ')) { const p = autoRaw.split(' '); autoCut = { day: p[0], time: p[1] }; }
         const newConfig = { dashId, logId, timezone: pre.timezone, adminRoles: pre.adminRoles, autoCut };
         const res = await saveConfigToChannel(interaction.guild, newConfig);
         const ch = await interaction.guild.channels.fetch(dashId).catch(()=>null);
         if (ch) sendDashboard(ch, interaction.guild.id);
-        if(res.success) await interaction.reply({ content: '✅ Guardado y blindado.', ephemeral: true });
-        else await interaction.reply({ content: `⚠️ Error: ${res.error}`, ephemeral: true });
+        if(res.success) await interaction.reply({ content: '✅ **Instalación Correcta**. Panel enviado al canal elegido.', ephemeral: true });
+        else await interaction.reply({ content: `⚠️ Error: ${res.error}.`, ephemeral: true });
     }
 
     // ACUMULAR
@@ -327,12 +307,12 @@ client.on('interactionCreate', async (interaction) => {
         const conf = localConfig[interaction.guild.id];
         if(!conf) return interaction.reply({content:'⚠️ Espera...', ephemeral:true});
         const isAdmin = interaction.member.roles.cache.some(r=>(conf.adminRoles||[]).includes(r.id)) || interaction.user.id===interaction.guild.ownerId;
-        if(!isAdmin) return interaction.reply({content:'⛔ Sin permiso.', ephemeral:true});
-        await interaction.reply({content:'⏳ Borrando...', ephemeral:true});
+        if(!isAdmin) return interaction.reply({content:'⛔ Solo Admins.', ephemeral:true});
+        await interaction.reply({content:'⏳ Reseteando...', ephemeral:true});
         const ch = await client.channels.fetch(conf.logId).catch(()=>null);
         if(ch){
             const n = await clearUserLogs(ch, targetId);
-            await interaction.editReply(`✅ Reset completo. (${n} borrados)`);
+            await interaction.editReply(`✅ Reset completo. Borrados: ${n}`);
         } else interaction.editReply('❌ No logs.');
     }
 
@@ -341,17 +321,17 @@ client.on('interactionCreate', async (interaction) => {
         const uId = interaction.user.id;
         const gId = interaction.guild.id;
         const conf = localConfig[gId];
-        if(!conf) return interaction.reply({content:'⚠️ Recuperando memoria...', ephemeral:true});
+        if(!conf) return interaction.reply({content:'⚠️ Reiniciando memoria...', ephemeral:true});
 
         if(interaction.customId==='btn_start'){
-            if(frozenStates[gId]) return interaction.reply({content:'❄️ Congelado.', ephemeral:true});
+            if(frozenStates[gId]) return interaction.reply({content:'❄️ Sistema cerrado.', ephemeral:true});
             if(sessions[uId]) return interaction.reply({content:'❌ Ya estás dentro.', ephemeral:true});
             const ch = await client.channels.fetch(conf.logId).catch(()=>null);
             let mId = null;
             if(ch){ const m = await ch.send({embeds:[new EmbedBuilder().setDescription(`🟢 <@${uId}> ha iniciado turno.`).setColor(0x57F287)]}); mId = m.id; }
             sessions[uId] = { start: Date.now(), guildId: gId, startMsgId: mId };
             updateDash(gId);
-            return interaction.reply({content:'✅ Iniciado.', ephemeral:true});
+            return interaction.reply({content:'✅ Turno iniciado. (Botón Verde)', ephemeral:true});
         }
 
         if(interaction.customId==='btn_stop'){
@@ -365,23 +345,36 @@ client.on('interactionCreate', async (interaction) => {
             const hist = await calculateTotalFromLogs(gId, uId, conf.logId);
             const tot = hist + dur;
             if(ch){
-                const emb = new EmbedBuilder().setTitle('📕 Turno Cerrado').addFields({name:'Usuario', value:`<@${uId}>`, inline:true},{name:'Sesión', value:`**${moment.duration(dur).format("h[h] m[m]")}**`, inline:true},{name:'Acumulado', value:`**${moment.duration(tot).format("h[h] m[m]")}**`, inline:true}).setColor(0xED4245).setTimestamp();
-                const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`btn_accumulate_${uId}`).setLabel('Reset').setStyle(ButtonStyle.Secondary).setEmoji('📥'));
+                const emb = new EmbedBuilder().setTitle('📕 Turno Cerrado').addFields({name:'Usuario', value:`<@${uId}>`, inline:true},{name:'Sesión', value:`**${moment.duration(dur).format("h[h] m[m]")}**`, inline:true},{name:'Total', value:`**${moment.duration(tot).format("h[h] m[m]")}**`, inline:true}).setColor(0xED4245).setTimestamp();
+                const btn = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`btn_accumulate_${uId}`).setLabel('Resetear').setStyle(ButtonStyle.Secondary).setEmoji('📥'));
                 await ch.send({embeds:[emb], components:[btn]});
             }
             delete sessions[uId];
             updateDash(gId);
-            return interaction.editReply(`👋 Cerrado.\nSesión: **${moment.duration(dur).format("h[h] m[m]")}**`);
+            return interaction.editReply(`👋 Cerrado (Botón Rojo).\nSesión: **${moment.duration(dur).format("h[h] m[m]")}**`);
         }
     }
 });
 
 // AUXILIARES
+async function sendDashboard(channel, guildId) {
+    const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('btn_start').setLabel('ENTRAR').setStyle(ButtonStyle.Success).setEmoji('🟢'),
+        new ButtonBuilder().setCustomId('btn_stop').setLabel('SALIR').setStyle(ButtonStyle.Danger).setEmoji('🔴')
+    );
+    const emb = new EmbedBuilder()
+        .setTitle('⏱️ Control de Asistencia')
+        .setDescription('**¿Cómo usarlo?**\nPresiona los botones para registrar tu actividad:\n\n🟢 **ENTRAR:** Inicia tu turno.\n🔴 **SALIR:** Termina tu turno y guarda el tiempo.')
+        .setColor(0x5865F2)
+        .addFields({ name: 'Activos Ahora', value: '*Nadie*' });
+    await channel.send({ embeds: [emb], components: [row] });
+}
+
 async function updateDash(gId){
     const c = localConfig[gId]; if(!c)return;
     const ch = await client.channels.fetch(c.dashId).catch(()=>null); if(!ch)return;
     let l=[]; for(const u in sessions) if(sessions[u].guildId===gId) l.push(`• <@${u}> (<t:${Math.floor(sessions[u].start/1000)}:R>)`);
-    const emb = new EmbedBuilder().setTitle('⏱️ Panel').setDescription(`**Estado:** ${frozenStates[gId]?'❄️':'🟢'}`).setColor(frozenStates[gId]?0x99AAB5:0x5865F2).addFields({name:'Activos', value:l.length?l.join('\n'):'*Nadie*'});
+    const emb = new EmbedBuilder().setTitle('⏱️ Control de Asistencia').setDescription(`**Estado:** ${frozenStates[gId]?'❄️ Cerrado':'🟢 Activo'}`).setColor(frozenStates[gId]?0x99AAB5:0x5865F2).addFields({name:'Activos Ahora', value:l.length?l.join('\n'):'*Nadie*'});
     const ms = await ch.messages.fetch({limit:10});
     const b = ms.find(m=>m.author.id===client.user.id && m.components.length>0);
     if(b) b.edit({embeds:[emb]});
