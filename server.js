@@ -13,7 +13,6 @@ const momentTimezone = require('moment-timezone');
 const mongoose = require('mongoose');
 const PDFDocument = require('pdfkit');
 const axios = require('axios');
-
 const dbURI = process.env.MONGO_URI;
 if (!dbURI) {
     console.error("❌ ERROR CRÍTICO: Falta la variable MONGO_URI.");
@@ -21,7 +20,7 @@ if (!dbURI) {
 }
 
 mongoose.connect(dbURI)
-    .then(() => console.log('🗄️ V22 Final Polished DB Conectada.'))
+    .then(() => console.log('🗄️ V24 Universal Edition DB Conectada.'))
     .catch(err => {
         console.error('❌ Error conectando a MongoDB:', err);
         process.exit(1);
@@ -29,19 +28,20 @@ mongoose.connect(dbURI)
 
 const GuildConfigSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
+    systemType: { type: String, default: 'habbo' }, 
     mode: { type: Number, default: 2 }, 
-    dashChannelId: String,        
-    supervisorChannelId: String,  
-    logChannelId: String,        
+    dashChannelId: String,
+    supervisorChannelId: String,
+    logChannelId: String,
     configChannelId: String,
     timezone: String,
     adminRoles: [String],
     rolePermissions: [{ takerRoleId: String, targetRoleIds: [String] }],
     autoCut: { day: String, time: String },
     isFrozen: { type: Boolean, default: false },
-    liveDashboardMsgId: String,       
-    supervisorDashboardMsgId: String, 
-    publicDashboardMsgId: String     
+    liveDashboardMsgId: String,
+    supervisorDashboardMsgId: String,
+    publicDashboardMsgId: String
 });
 const GuildConfig = mongoose.model('GuildConfig', GuildConfigSchema);
 
@@ -68,18 +68,18 @@ UserStateSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 const UserState = mongoose.model('UserState', UserStateSchema);
 
 const app = express();
-app.get('/', (req, res) => res.send('Bot V22 Final Activo.'));
+app.get('/', (req, res) => res.send('Bot V24 Universal Activo.'));
 app.get('/ping', (req, res) => res.status(200).send('Pong!'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-    presence: { status: 'online', activities: [{ name: '!guia | V22', type: ActivityType.Watching }] }
+    presence: { status: 'online', activities: [{ name: '!guia | V24', type: ActivityType.Watching }] }
 });
 
 const rateLimits = new Map();
-const SPAM_COOLDOWN = 1000; 
+const SPAM_COOLDOWN = 1000;
 const setupCache = new Map();
 const TIMEZONES = [{ label: '🇲🇽 México', value: 'America/Mexico_City' }, { label: '🇨🇴/🇵🇪 Colombia', value: 'America/Bogota' }, { label: '🇦🇷/🇨🇱 Argentina', value: 'America/Argentina/Buenos_Aires' }, { label: '🇪🇸 España', value: 'Europe/Madrid' }, { label: '🇺🇸 USA (NY)', value: 'America/New_York' }];
 
@@ -92,7 +92,7 @@ function calculateDuration(s, end=new Date()) {
 }
 function getHabboHeadUrl(username) { return `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&direction=2&head_direction=2&action=&gesture=nrm&size=s&headonly=1`; }
 
-async function generateActiveList(guildId, guild) {
+async function generateActiveList(guildId, guild, systemType) {
     const active = await WorkSession.find({ guildId: guildId, endTime: null });
     if (!active.length) return "\n💤 **Sin actividad en este momento.**";
 
@@ -109,13 +109,21 @@ async function generateActiveList(guildId, guild) {
         }
 
         const statusIcon = s.isPaused ? "⏸️ PAUSADO" : "🟢 ACTIVO";
-        list += `> 👤 **${userName}** | ${infoSup}\n` +
+        
+        let displayNameStr = userName;
+        if (systemType === 'habbo') {
+            displayNameStr = `[${userName}](${getHabboHeadUrl(userName)})`;
+        } else {
+            displayNameStr = `**${userName}**`; 
+        }
+
+        list += `> 👤 ${displayNameStr} | ${infoSup}\n` +
                 `> ${statusIcon} | ⏱️ Transcurrido: <t:${Math.floor(s.startTime / 1000)}:R>\n\n`;
     }
     return list;
 }
 
-async function generateHistoryPDF(userId, guildId, username, sessions, timezone, guild) {
+async function generateHistoryPDF(userId, guildId, username, sessions, timezone, guild, systemType) {
     return new Promise(async (resolve, reject) => {
         try {
             const doc = new PDFDocument({ margin: 40, size: 'A4' });
@@ -123,32 +131,50 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
 
-            try {
-                const imgRes = await axios.get(getHabboHeadUrl(username), { responseType: 'arraybuffer', timeout: 1500 });
-                doc.image(imgRes.data, (doc.page.width / 2) - 20, 30, { width: 40 });
-            } catch (e) {}
+            if (systemType === 'habbo') {
+                try {
+                    const imgRes = await axios.get(getHabboHeadUrl(username), { responseType: 'arraybuffer', timeout: 1500 });
+                    doc.image(imgRes.data, (doc.page.width / 2) - 20, 30, { width: 40 });
+                } catch (e) {}
+                doc.moveDown(3);
+            } else {
+                doc.moveDown(2); 
+            }
 
-            doc.moveDown(3);
-            doc.font('Helvetica-Bold').fontSize(22).fillColor('#2c3e50').text(`AGENCIA ${guild.name.toUpperCase()}`, { align: 'center' });
+            const titlePrefix = systemType === 'habbo' ? 'AGENCIA' : 'EMPRESA';
+            doc.font('Helvetica-Bold').fontSize(22).fillColor('#2c3e50').text(`${titlePrefix} ${guild.name.toUpperCase()}`, { align: 'center' });
             doc.font('Helvetica-Oblique').fontSize(10).fillColor('#7f8c8d').text('Sistema de historial de tiempo acumulado', { align: 'center' });
+            
             doc.moveDown(0.5);
             doc.font('Helvetica').fontSize(12).fillColor('black').text(`Reporte de: ${username}`, { align: 'center' });
             doc.fontSize(10).text(`Generado: ${moment().format('DD/MM/YYYY HH:mm')}`, { align: 'center' });
             doc.moveDown(2);
 
-            const startX = 40; let currentY = doc.y;
-            const colWidths = { fecha: 60, inicio: 50, fin: 50, dur: 70, tipo: 130, status: 60, avatar: 40 };
+            const startX = 40; 
+            let currentY = doc.y;
+            
+            let colWidths;
+            if (systemType === 'habbo') {
+                colWidths = { fecha: 60, inicio: 50, fin: 50, dur: 70, tipo: 130, status: 60, avatar: 40 };
+            } else {
+                colWidths = { fecha: 70, inicio: 60, fin: 60, dur: 80, tipo: 170, status: 80, avatar: 0 };
+            }
             
             doc.rect(startX, currentY, 520, 20).fill('#ecf0f1');
             doc.fillColor('black').font('Helvetica-Bold').fontSize(9);
+            
             let cx = startX + 5;
             doc.text('FECHA', cx, currentY + 5); cx += colWidths.fecha;
             doc.text('INICIO', cx, currentY + 5); cx += colWidths.inicio;
             doc.text('FIN', cx, currentY + 5); cx += colWidths.fin;
             doc.text('DURACIÓN', cx, currentY + 5); cx += colWidths.dur;
             doc.text('ENCARGADO', cx, currentY + 5); cx += colWidths.tipo;
-            doc.text('ESTADO', cx, currentY + 5); cx += colWidths.status;
-            doc.text('AVATAR', cx, currentY + 5);
+            doc.text('ESTADO', cx, currentY + 5); 
+            
+            if (systemType === 'habbo') {
+                cx += colWidths.status;
+                doc.text('AVATAR', cx, currentY + 5);
+            }
 
             currentY += 25; doc.font('Helvetica').fontSize(9);
             let totalMs = 0;
@@ -160,38 +186,40 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
                 
                 let initiatorName = "Auto-Servicio";
                 let initiatorAvatarUrl = null;
+
                 if (s.startedBy !== s.userId) {
                     if(guild) {
                         const sup = await guild.members.fetch(s.startedBy).catch(()=>null);
                         initiatorName = sup ? sup.displayName : `ID: ${s.startedBy}`;
                     } else initiatorName = s.startedBy;
-                    initiatorAvatarUrl = getHabboHeadUrl(initiatorName);
-                } else initiatorAvatarUrl = getHabboHeadUrl(username);
-
-                const dateStr = moment(s.startTime).tz(tz).format('DD/MM/YY');
-                const startStr = moment(s.startTime).tz(tz).format('HH:mm');
-                const endStr = s.endTime ? moment(s.endTime).tz(tz).format('HH:mm') : '---';
-                const durStr = moment.duration(dur).format("h[h] m[m]");
-                const statusStr = s.endTime ? 'Cerrado' : 'Activo';
+                    if(systemType === 'habbo') initiatorAvatarUrl = getHabboHeadUrl(initiatorName);
+                } else {
+                    if(systemType === 'habbo') initiatorAvatarUrl = getHabboHeadUrl(username);
+                }
 
                 cx = startX + 5;
-                doc.text(dateStr, cx, currentY); cx += colWidths.fecha;
-                doc.text(startStr, cx, currentY); cx += colWidths.inicio;
-                doc.text(endStr, cx, currentY); cx += colWidths.fin;
-                doc.text(durStr, cx, currentY); cx += colWidths.dur;
-                doc.text(initiatorName.substring(0, 22), cx, currentY); cx += colWidths.tipo;
-                doc.text(statusStr, cx, currentY); cx += colWidths.status;
+                doc.text(moment(s.startTime).tz(tz).format('DD/MM/YY'), cx, currentY); cx += colWidths.fecha;
+                doc.text(moment(s.startTime).tz(tz).format('HH:mm'), cx, currentY); cx += colWidths.inicio;
+                doc.text(s.endTime ? moment(s.endTime).tz(tz).format('HH:mm') : '---', cx, currentY); cx += colWidths.fin;
+                doc.text(moment.duration(dur).format("h[h] m[m]"), cx, currentY); cx += colWidths.dur;
+                doc.text(initiatorName.substring(0, 25), cx, currentY); cx += colWidths.tipo;
+                doc.text(s.endTime ? 'Cerrado' : 'Activo', cx, currentY); 
 
-                if (initiatorAvatarUrl) {
-                    try {
-                        const headRes = await axios.get(initiatorAvatarUrl, { responseType: 'arraybuffer', timeout: 1000 });
-                        doc.image(headRes.data, cx, currentY - 5, { width: 18 });
-                    } catch (e) { doc.text('-', cx, currentY); }
+                if (systemType === 'habbo') {
+                    cx += colWidths.status;
+                    if (initiatorAvatarUrl) {
+                        try {
+                            const headRes = await axios.get(initiatorAvatarUrl, { responseType: 'arraybuffer', timeout: 1000 });
+                            doc.image(headRes.data, cx, currentY - 5, { width: 18 });
+                        } catch (e) { doc.text('-', cx, currentY); }
+                    }
                 }
+
                 doc.moveTo(startX, currentY + 15).lineTo(560, currentY + 15).lineWidth(0.5).strokeColor('#ecf0f1').stroke();
                 doc.strokeColor('black');
                 currentY += 20;
             }
+
             doc.moveDown(2);
             doc.rect(startX, currentY, 200, 30).fill('#ecf0f1');
             doc.fillColor('black').font('Helvetica-Bold').fontSize(14).text(`TOTAL ACUMULADO: ${moment.duration(totalMs).format("h[h] m[m]")}`, startX + 10, currentY + 8);
@@ -200,7 +228,7 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
     });
 }
 client.on('ready', () => {
-    console.log(`🤖 V22 Final Online: ${client.user.tag}`);
+    console.log(`🤖 V24 Universal Online: ${client.user.tag}`);
     setInterval(checkAutoSchedules, 60000);
     setInterval(updateAllDashboardsGlobal, 30000);
     updateAllDashboardsGlobal();
@@ -209,7 +237,6 @@ client.on('ready', () => {
 function updateAllDashboardsGlobal() {
     client.guilds.cache.forEach(g => updateAllDashboards(g.id));
 }
-
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
 
@@ -227,15 +254,14 @@ client.on('messageCreate', async (m) => {
     if (m.content === '!guide' || m.content === '!guia') {
         const guiaEmbed = new EmbedBuilder()
             .setTitle('✨ Bienvenido a TIEMPILLO')
-            .setDescription('Sistema profesional para la gestión de nóminas y control de asistencia.\nLlevamos un registro exacto de las horas trabajadas, gestionamos pausas y generamos reportes PDF con avatares.')
+            .setDescription('Sistema profesional para el control de asistencia y nómina (Agencias HB & Empresas).\nRegistra horas, gestiona pausas y genera reportes PDF.')
             .setColor(0x00A8FF)
-            .setThumbnail('https://www.habbo.com/habbo-imaging/avatarimage?figure=hr-890-45-.hd-600-3-.ch-685-77-.lg-705-81-.sh-730-62-.ca-1810-undefined-.wa-2007-undefined-&gender=M&direction=4&head_direction=2&action=wav&gesture=nrm&size=m')
             .addFields(
-                { name: '🚀 Inicio Rápido', value: 'Dueño: Crea los canales (`#fichar`, `#logs`, `#control-tiempos`) y usa `!run`.' },
+                { name: '🚀 Inicio Rápido', value: 'Dueño: Usa `!run` para configurar el tipo de sistema (HB/Empresa) y los canales.' },
                 { name: '👮 Para Administradores', value: '`!run`: Configuración.\n`!nomina`: Ver pagos y PDFs.\n`!time @user`: Historial y Ajustes.\n`!multar` / `!ban`: Sanciones.' },
                 { name: '👥 Operación', value: '`!mitiempo`: Tu acumulado (DM).\n`!tomar @user`: Iniciar tiempo (Supervisores).\nTambién puedes usar los paneles interactivos.' }
             )
-            .setFooter({ text: 'Tiempillo System V22 Final' });
+            .setFooter({ text: 'Tiempillo System V24 Universal' });
         m.reply({ embeds: [guiaEmbed] });
     }
 
@@ -270,7 +296,7 @@ client.on('messageCreate', async (m) => {
             updateAllDashboards(m.guild.id); return;
         }
 
-        if(cmd==='!run' && m.author.id!==m.guild.ownerId) return m.reply('❌ Solo el Dueño puede configurar.');
+        if(cmd==='!run' && m.author.id!==m.guild.ownerId) return m.reply('❌ Solo Owner.');
         if(cmd!=='!run' && !(await isAdmin(m.member, m.guild.id))) return m.reply('⛔ Admin.');
         const target = m.mentions.users.first();
 
@@ -294,12 +320,12 @@ client.on('messageCreate', async (m) => {
         if (cmd==='!run') {
             const c = await GuildConfig.findOne({ guildId: m.guild.id });
             if(c) return m.reply({ embeds:[new EmbedBuilder().setTitle('⚠️ Ya Configurado').setDescription('Usa el botón para resetear.').setColor(0xFFA500)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_reset_config_confirm').setLabel('🔄 Resetear Configuración').setStyle(4))] });
-            const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_mode_select').setPlaceholder('Selecciona el Modo').addOptions(
-                { label: 'Usuarios toman time a usuarios', value: '1', emoji: '👮' },
-                { label: 'Usuarios se toman times solos', value: '2', emoji: '🤖' },
-                { label: 'Híbrido (Ambos)', value: '3', emoji: '✨' }
+            
+            const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_type_select').setPlaceholder('Selecciona el Tipo de Sistema').addOptions(
+                { label: 'Agencia Habbo', description: 'Incluye avatares en PDF y perfil.', value: 'habbo', emoji: '🏨' },
+                { label: 'Empresa / Negocio Común', description: 'Formato estándar y serio.', value: 'standard', emoji: '💼' }
             ));
-            m.reply({ content: `👋 **Instalación V22**\nElige el modo de operación:`, components: [row] });
+            m.reply({ content: `👋 **Instalación V24**\n¿Qué tipo de organización gestionas?`, components: [row] });
         }
 
         if (cmd==='!corte') { const c=await GuildConfig.findOne({guildId:m.guild.id}); const l=await client.channels.fetch(c.logChannelId).catch(()=>null); if(l){await l.send('✂️ CORTE'); m.reply('✅');} }
@@ -321,18 +347,33 @@ client.on('interactionCreate', async (i) => {
     if (i.isButton() && isRateLimited(i.user.id)) return i.reply({ content: '⏳ ...', ephemeral: true });
     const gId = i.guild.id; const uId = i.user.id;
 
-    if (i.isStringSelectMenu() && i.customId === 'setup_mode_select') {
+    if (i.isStringSelectMenu() && i.customId === 'setup_type_select') {
         if (i.user.id !== i.guild.ownerId) return i.reply({ content: '❌ Owner.', ephemeral: true });
-        const mode = parseInt(i.values[0]); setupCache.set(gId, { mode: mode, permissions: [] });
+        const type = i.values[0];
+        setupCache.set(gId, { systemType: type });
+        
+        const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_mode_select').setPlaceholder('Selecciona el Modo').addOptions(
+            { label: 'Usuarios toman time a usuarios', value: '1', emoji: '👮' },
+            { label: 'Usuarios se toman times solos', value: '2', emoji: '🤖' },
+            { label: 'Híbrido (Ambos)', value: '3', emoji: '✨' }
+        ));
+        await i.update({ content: `✅ Tipo: ${type==='habbo'?'Agencia Habbo':'Empresa'}\nAhora elige el modo de operación:`, components: [row] });
+    }
+
+    if (i.isStringSelectMenu() && i.customId === 'setup_mode_select') {
+        const mode = parseInt(i.values[0]); 
+        const c = setupCache.get(gId); c.mode = mode; c.permissions = []; setupCache.set(gId, c);
+        
         if (mode === 1 || mode === 3) {
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_add').setLabel('Agregar Regla').setStyle(3), new ButtonBuilder().setCustomId('setup_perm_finish').setLabel('Terminar Permisos').setStyle(1));
-            await i.update({ content: `✅ Modo ${mode}.\nDefinir Jerarquía:`, components: [row] });
+            await i.update({ content: `✅ Modo ${mode}.\n**Jerarquía:** Define quién toma time a quién.`, components: [row] });
         } else triggerGeneralSetup(i);
     }
+
     if (i.customId === 'setup_perm_add') {
         const r1 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_taker').setPlaceholder('Supervisor').setMaxValues(1));
-        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_target').setPlaceholder('Objetivos (Multi-Selección)').setMinValues(1).setMaxValues(10));
-        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_save').setLabel('Guardar Regla').setStyle(3));
+        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_target').setPlaceholder('Objetivos (Multi)').setMinValues(1).setMaxValues(10));
+        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_save').setLabel('Guardar').setStyle(3));
         await i.reply({ content: 'Nueva Regla:', components: [r1, r2, r3], ephemeral: true });
     }
     if(i.isRoleSelectMenu() && i.customId==='setup_perm_taker') { const c=setupCache.get(uId)||{}; c.tempTaker=i.values[0]; setupCache.set(uId,c); i.deferUpdate(); }
@@ -349,7 +390,7 @@ client.on('interactionCreate', async (i) => {
     async function triggerGeneralSetup(interaction) {
         const msg = "🔧 **Configuración General**";
         const r = [
-            new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('Elige la Zona Horaria de tu Bot').addOptions(TIMEZONES)), 
+            new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('Elige la Zona Horaria').addOptions(TIMEZONES)), 
             new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('Roles Administradores').setMinValues(1).setMaxValues(10)), 
             new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_continue_setup_final').setLabel('Siguiente').setStyle(1))
         ];
@@ -377,7 +418,19 @@ client.on('interactionCreate', async (i) => {
         try { if(c.mode!==1) dashId = i.fields.getTextInputValue('dash'); } catch(e){}
         try { if(c.mode!==2) supId = i.fields.getTextInputValue('sup'); } catch(e){}
         try {
-            await GuildConfig.findOneAndUpdate({ guildId: gId }, { mode: c.mode, dashChannelId: dashId, supervisorChannelId: supId, logChannelId: logId, configChannelId: i.channelId, timezone: c.timezone, adminRoles: c.adminRoles, rolePermissions: c.permissions || [], autoCut, isFrozen: false }, { upsert: true, new: true });
+            await GuildConfig.findOneAndUpdate({ guildId: gId }, { 
+                systemType: c.systemType, 
+                mode: c.mode, 
+                dashChannelId: dashId, 
+                supervisorChannelId: supId, 
+                logChannelId: logId, 
+                configChannelId: i.channelId, 
+                timezone: c.timezone, 
+                adminRoles: c.adminRoles, 
+                rolePermissions: c.permissions || [], 
+                autoCut, 
+                isFrozen: false 
+            }, { upsert: true, new: true });
             
             if(dashId) { const ch = await i.guild.channels.fetch(dashId); sendPublicDashboardMsg(ch, gId); }
             if(supId) { const ch = await i.guild.channels.fetch(supId); sendSupervisorDashboardMsg(ch, gId); }
@@ -424,8 +477,8 @@ client.on('interactionCreate', async (i) => {
             const m = await i.guild.members.fetch(t).catch(() => null);
             const c = await GuildConfig.findOne({ guildId: gId });
             try {
-                const pdf = await generateHistoryPDF(t, gId, m ? m.displayName : t, ss, c.timezone, i.guild);
-                await i.editReply({ content: `📄 **Reporte PDF para ${m ? m.displayName : t}**`, files: [new AttachmentBuilder(pdf, { name: 'Reporte.pdf' })] });
+                const pdf = await generateHistoryPDF(t, gId, m ? m.displayName : t, ss, c.timezone, i.guild, c.systemType);
+                await i.editReply({ content: `📄 **Reporte PDF**`, files: [new AttachmentBuilder(pdf, { name: 'Reporte.pdf' })] });
             } catch (error) { await i.editReply('❌ Error PDF.'); }
         }
     }
@@ -512,11 +565,13 @@ async function updateSupervisorDash(gId, listText) {
     const ch = await client.channels.fetch(config.supervisorChannelId).catch(() => null);
     if (!ch) return;
 
-    const emb = new EmbedBuilder().setTitle('👮 Panel Supervisor').setDescription("**Tiempos Activos**\n" + listText + "\n\nUse `!tomar @usuario` para iniciar.").setColor(0xE67E22);
+    const emb = new EmbedBuilder().setTitle('👮 Panel Supervisor').setDescription("**Tiempos Activos**\n" + listText + "\n\nUse el botón para iniciar tiempo.").setColor(0xE67E22);
     
-    try { const m = await ch.messages.fetch(config.supervisorDashboardMsgId); await m.edit({ embeds: [emb], components: [] }); } 
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_sup_take_time').setLabel('⏱️ Tomar Tiempo').setStyle(2));
+
+    try { const m = await ch.messages.fetch(config.supervisorDashboardMsgId); await m.edit({ embeds: [emb], components: [row] }); } 
     catch(e) { 
-        const n = await ch.send({ embeds: [emb] }); 
+        const n = await ch.send({ embeds: [emb], components: [row] }); 
         config.supervisorDashboardMsgId = n.id; await config.save(); 
     }
 }
@@ -545,7 +600,7 @@ async function updateAllDashboards(guildId) {
     const guild = await client.guilds.fetch(guildId).catch(()=>null);
     if (!guild) return;
 
-    const listText = await generateActiveList(guildId, guild);
+    const listText = await generateActiveList(guildId, guild, config.systemType);
 
     await updatePublicDash(guildId, listText);
     await updateSupervisorDash(guildId, listText);
