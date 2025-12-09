@@ -14,6 +14,12 @@ const momentTimezone = require('moment-timezone');
 const app = express();
 const port = process.env.PORT || 3000;
 app.get('/', (req, res) => res.send('Bot V10.2 Explicativo Activo.'));
+
+app.get('/ping', (req, res) => {
+    res.status(200).send('Pong! 🏓');
+});
+// -------------------------------
+
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 // --- CLIENTE DISCORD ---
