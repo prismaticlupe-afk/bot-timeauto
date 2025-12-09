@@ -10,9 +10,10 @@ const fs = require('fs');
 require('moment-duration-format');
 const momentTimezone = require('moment-timezone');
 
+// --- SERVIDOR WEB (Para UptimeRobot) ---
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot V11 Publico Activo.'));
+app.get('/', (req, res) => res.send('Bot V11.1 Publico Protegido Activo.'));
 app.get('/ping', (req, res) => { res.status(200).send('Pong! 🏓'); });
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
@@ -38,6 +39,9 @@ const TIMEZONES = [
     { label: '🇺🇸 USA (New York)', value: 'America/New_York' }
 ];
 
+// ==========================================
+// 🚀 INICIO CON AUTO-RESTAURACIÓN
+// ==========================================
 client.on('ready', async () => {
     console.log(`🤖 Bot Conectado: ${client.user.tag}`);
     const guilds = client.guilds.cache;
@@ -86,6 +90,9 @@ async function restoreSessionsFromChat(guild, config) {
 }
 
 
+// ==========================================
+// 🛡️ SEGURIDAD Y CONFIGURACIÓN
+// ==========================================
 function isRateLimited(userId) {
     const now = Date.now();
     const last = rateLimits.get(userId);
@@ -113,18 +120,27 @@ async function saveConfigToChannel(guild, targetChannelId, config) {
     } catch (e) { return { success: false, error: 'Falta permiso "Gestionar Canal" en este canal de configuración.' }; }
 }
 
-async function recoverConfig(guild) {
-    if (localConfig[guild.id]) return localConfig[guild.id];
+// Esta función busca si ya existe una configuración guardada en algún canal
+async function findConfigChannel(guild) {
     const channels = await guild.channels.fetch().catch(()=>new Map());
     for (const channel of channels.values()) {
         if (channel.topic && channel.topic.includes('🔒 CONFIG_BOT')) {
-            try {
-                const raw = channel.topic.match(/\[(.*?)\]/)[1];
-                const rec = JSON.parse(raw);
-                localConfig[guild.id] = rec;
-                return rec;
-            } catch (e) {}
+            return channel;
         }
+    }
+    return null;
+}
+
+async function recoverConfig(guild) {
+    if (localConfig[guild.id]) return localConfig[guild.id];
+    const configChannel = await findConfigChannel(guild);
+    if (configChannel) {
+        try {
+            const raw = configChannel.topic.match(/\[(.*?)\]/)[1];
+            const rec = JSON.parse(raw);
+            localConfig[guild.id] = rec;
+            return rec;
+        } catch (e) {}
     }
     return null; 
 }
@@ -183,7 +199,6 @@ function parseDurationToMs(s){ let ms=0; const r=/(\d+)\s*(h|m|s)/g; let m; whil
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // --- COMANDO GUÍA PROFESIONAL ---
     if (message.content === '!guide' || message.content === '!guia') {
         const guideEmbed = new EmbedBuilder()
             .setTitle('📘 Configuración Inicial del Bot')
@@ -205,13 +220,27 @@ client.on('messageCreate', async (message) => {
 
     if (message.content === '!run') {
         if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Dueño del servidor (Owner) puede usar esto.');
+
+        let existingConfig = localConfig[message.guild.id] || await recoverConfig(message.guild);
+        
+        if (existingConfig) {
+            const configChannel = await findConfigChannel(message.guild);
+            let msgError = '⚠️ **El bot ya está configurado en este servidor.**';
+            if (configChannel) {
+                msgError += `\n\nLa configuración actual está guardada en la descripción del canal: ${configChannel}.\n\n**¿Quieres reinstalarlo?**\nPrimero debes ir a ese canal, editarlo y **borrar toda su descripción** (Topic). Luego podrás usar \`!run\` de nuevo.`;
+            } else {
+                msgError += '\n\n(Parece que está configurado pero no encuentro el canal de memoria. Si necesitas reinstalar, intenta reiniciar el bot primero).';
+            }
+            return message.reply(msgError);
+        }
+
         if (message.channel.permissionsFor(message.guild.roles.everyone).has(PermissionsBitField.Flags.ViewChannel)) {
              message.reply('⚠️ **Recomendación:** Es mejor usar este comando en un canal privado (ej. `#config-bot`) para mantener oculta la configuración técnica.');
         }
         message.delete().catch(()=>{});
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Iniciar Instalación').setStyle(ButtonStyle.Success));
         const msg = await message.channel.send({ content: `👋 **Menú de Instalación**\nAsegúrate de tener las IDs de los canales #fichar y #logs.\n(Usa \`!guia\` si tienes dudas).`, components: [row] });
-        setTimeout(() => msg.delete().catch(()=>{}), 60000 * 5); // 5 minutos para configurar
+        setTimeout(() => msg.delete().catch(()=>{}), 60000 * 5); 
         return;
     }
 
@@ -264,6 +293,8 @@ client.on('interactionCreate', async (interaction) => {
     // SETUP
     if (interaction.isButton() && interaction.customId === 'sys_setup_trigger') {
         if (interaction.user.id !== interaction.guild.ownerId) return interaction.reply({content:'❌ Solo Owner.', ephemeral:true});
+        if (localConfig[interaction.guild.id]) return interaction.reply({content:'⚠️ El bot ya está configurado. Borra la descripción del canal de configuración para reiniciar.', ephemeral:true});
+
         const r1 = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('1. Selecciona Zona Horaria').addOptions(TIMEZONES));
         const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('2. Roles ADMIN (Jefes)').setMinValues(1).setMaxValues(5));
         const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_continue_setup').setLabel('Siguiente (Poner IDs)').setStyle(ButtonStyle.Primary));
