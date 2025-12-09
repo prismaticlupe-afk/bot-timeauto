@@ -82,6 +82,7 @@ const TIMEZONES = [
     { label: '🇺🇸 USA (New York)', value: 'America/New_York' }
 ];
 
+
 function isRateLimited(userId) {
     const now = Date.now();
     const last = rateLimits.get(userId);
@@ -108,10 +109,11 @@ function calculateDuration(session, referenceEndDate = new Date()) {
     return totalElapsed - session.totalPausedMs - currentPauseDuration;
 }
 
+
 client.on('ready', async () => {
     console.log(`🤖 V13 Enterprise Online: ${client.user.tag}`);
     
-    setInterval(checkAutoSchedules, 60000); 
+    setInterval(checkAutoSchedules, 60000);
     setInterval(refreshAllLiveDashboards, 30000); 
 
     client.guilds.cache.forEach(guild => {
@@ -126,7 +128,7 @@ client.on('messageCreate', async (message) => {
     if (message.content === '!mitiempo') {
         const config = await GuildConfig.findOne({ guildId: message.guild.id });
         if (!config) return message.reply('⚠️ Bot no configurado aquí.');
-        message.delete().catch(()=>{}); 
+        message.delete().catch(()=>{});
 
         await message.channel.sendTyping();
         
@@ -189,7 +191,7 @@ client.on('messageCreate', async (message) => {
             const isBan = message.content.startsWith('!bantime');
             await UserState.findOneAndUpdate(
                 { userId: target.id, guildId: message.guild.id },
-                { isBanned: isBan, penaltyUntil: null }, 
+                { isBanned: isBan, penaltyUntil: null },
                 { upsert: true }
             );
             message.reply(`✅ Usuario ${target.tag} ha sido **${isBan ? 'BANEADO 🚫' : 'ACTIVADO 🟢'}** del sistema de fichaje.`);
@@ -218,12 +220,14 @@ client.on('messageCreate', async (message) => {
             }
         }
 
+        // Comando: !run
         if (message.content === '!run') {
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Iniciar Instalación V13').setStyle(ButtonStyle.Success));
             message.reply({ content: `👋 **Instalación Enterprise V13**\nAsegúrate de tener creados los canales: \`#fichar\` (público) y \`#logs\` (privado).`, components: [row] });
         }
     }
 });
+
 
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton() && isRateLimited(interaction.user.id)) return interaction.reply({ content: '⏳ Calma, espera unos segundos...', ephemeral: true });
@@ -277,13 +281,14 @@ client.on('interactionCreate', async (interaction) => {
             if(config.liveDashboardMsgId) { try { (await logCh.messages.fetch(config.liveDashboardMsgId)).delete(); } catch(e){} }
             const liveMsg = await logCh.send({ content: 'Iniciando Dashboard en Vivo...' });
             config.liveDashboardMsgId = liveMsg.id; await config.save();
-            updateLiveAdminDash(gId); // Llenarlo con datos
+            updateLiveAdminDash(gId);
 
             await interaction.reply({ content: `✅ **Instalación V13 Completa**.\n- Panel Público en <#${dashId}>\n- Dashboard Admin en Vivo en <#${logId}>`, ephemeral: true });
         } catch (error) {
             await interaction.reply({ content: `⚠️ Error: ${error.message}`, ephemeral: true });
         }
     }
+
 
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith('menu_penalty_')) {
         const targetId = interaction.customId.split('_')[2];
@@ -292,7 +297,7 @@ client.on('interactionCreate', async (interaction) => {
 
         await UserState.findOneAndUpdate(
             { userId: targetId, guildId: gId },
-            { penaltyUntil: until, isBanned: false }, 
+            { penaltyUntil: until, isBanned: false },
             { upsert: true }
         );
         const timestamp = Math.floor(until.getTime() / 1000);
@@ -311,7 +316,7 @@ client.on('interactionCreate', async (interaction) => {
             if (userState) {
                 if (userState.isBanned) return interaction.reply({ content: '⛔ **Acceso Denegado:** Estás permanentemente bloqueado de este sistema.', ephemeral: true });
                 if (userState.penaltyUntil && userState.penaltyUntil > new Date()) {
-                    return interaction.reply({ content: `👮‍♂️ **Multa Activa:** No puedes fichar hasta <t:${Math.floor(userState.penaltyUntil/1000}:R>.`, ephemeral: true });
+                    return interaction.reply({ content: `👮‍♂️ **Multa Activa:** No puedes fichar hasta <t:${Math.floor(userState.penaltyUntil/1000)}:R>.`, ephemeral: true });
                 }
             }
 
@@ -330,14 +335,14 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.deferReply({ephemeral:true});
             
             session.endTime = new Date();
-            await session.save(); // Guardar cierre
+            await session.save();
 
-            const durationMs = calculateDuration(session); // Calcular duración real (sin pausas)
+            const durationMs = calculateDuration(session);
 
             const logCh = await client.channels.fetch(config.logChannelId).catch(()=>null);
-            if(logCh) logCh.send(`📕 **Cierre:** <@${uId}> terminó turno. Duración: \`${moment.duration(durationMs).format("h:mm")}\``);
+            if(logCh) logCh.send(`📕 **Cierre:** <@${uId}> terminó turno. Duración real: \`${moment.duration(durationMs).format("h[h] m[m] s[s]")}\``);
 
-            interaction.editReply(`👋 **Turno Cerrado.**\nTiempo registrado: **${moment.duration(durationMs).format("h[h] m[m]")}**`);
+            interaction.editReply(`👋 **Turno Cerrado.**\nTiempo registrado: **${moment.duration(durationMs).format("h[h] m[m] s[s]")}**`);
         }
 
         updatePublicDash(gId);
@@ -347,7 +352,7 @@ client.on('interactionCreate', async (interaction) => {
 
     if (interaction.isButton() && interaction.customId.startsWith('btn_admin_clear_db_')) {
         if(!(await isAdmin(interaction.member, gId))) return interaction.reply({content:'⛔ Solo Admins.', ephemeral:true});
-        const targetId = interaction.customId.split('_')[4]; // El ID está en la posición 4
+        const targetId = interaction.customId.split('_')[4];
         
         const confirmRow = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`confirm_delete_${targetId}`).setLabel('⚠️ CONFIRMAR BORRADO TOTAL').setStyle(ButtonStyle.Danger));
         interaction.reply({content:`⚠️ **¿Estás seguro?** Esto borrará PERMANENTEMENTE todo el historial cerrado de <@${targetId}> en la base de datos. No se puede deshacer.`, components:[confirmRow], ephemeral:true});
@@ -359,17 +364,18 @@ client.on('interactionCreate', async (interaction) => {
         interaction.editReply(`✅ **Base de Datos Limpiada.** Se eliminaron ${result.deletedCount} registros históricos de <@${targetId}>.`);
     }
 
+
     
     if (interaction.isButton() && interaction.customId.startsWith('live_ctl_')) {
         if(!(await isAdmin(interaction.member, gId))) return interaction.reply({content:'⛔ Permiso de Admin requerido.', ephemeral:true});
         
-        const action = interaction.customId.split('_')[2]; // 'pause', 'force', 'cancel'
+        const action = interaction.customId.split('_')[2];
         const activeSessions = await WorkSession.find({ guildId: gId, endTime: null });
         
         if (activeSessions.length === 0) return interaction.reply({content:'No hay usuarios activos para gestionar.', ephemeral:true});
 
         const options = [];
-        for(const s of activeSessions.slice(0, 25)){ // Límite de 25 opciones en Discord
+        for(const s of activeSessions.slice(0, 25)){
             const member = await interaction.guild.members.fetch(s.userId).catch(()=>null);
             const name = member ? (member.nickname || member.user.username) : `Usuario ${s.userId}`;
             const statusEmoji = s.isPaused ? '🥶' : '🟢';
@@ -381,9 +387,9 @@ client.on('interactionCreate', async (interaction) => {
             });
         }
 
-        const menu Rowland = new ActionRowBuilder().addComponents(
+        const menuRow = new ActionRowBuilder().addComponents(
             new StringSelectMenuBuilder()
-                .setCustomId(`live_exec_${action}`) 
+                .setCustomId(`live_exec_${action}`)
                 .setPlaceholder(`Selecciona usuario para: ${action.toUpperCase()}`)
                 .addOptions(options)
         );
@@ -400,31 +406,26 @@ client.on('interactionCreate', async (interaction) => {
 
         let msg = '';
         
-        // --- ACCIÓN: PAUSAR / REANUDAR ---
         if (action === 'pause') {
             if (session.isPaused) {
-                // REANUDAR
                 session.isPaused = false;
                 const pauseDuration = new Date() - session.pauseStartTime;
                 session.totalPausedMs += pauseDuration;
                 session.pauseStartTime = null;
                 msg = `▶️ **Reanudado:** Sesión de <@${targetId}> activa de nuevo.`;
             } else {
-                // PAUSAR
                 session.isPaused = true;
                 session.pauseStartTime = new Date();
                 msg = `⏸️ **Pausado:** Sesión de <@${targetId}> congelada. El tiempo no correrá.`;
             }
             await session.save();
         }
-        
         else if (action === 'force') {
             session.endTime = new Date();
             await session.save();
             const dur = calculateDuration(session);
-             msg = `📥 **Salida Forzada:** <@${targetId}> cerrado por admin. Tiempo guardado: ${moment.duration(dur).format("h:mm")}.`;
+             msg = `📥 **Salida Forzada:** <@${targetId}> cerrado por admin. Tiempo guardado: ${moment.duration(dur).format("h:mm:ss")}.`;
         }
-        
         else if (action === 'cancel') {
             await WorkSession.deleteOne({ _id: session._id });
             msg = `❌ **Sesión Cancelada:** La sesión actual de <@${targetId}> ha sido borrada y NO se guardará tiempo.`;
@@ -435,7 +436,6 @@ client.on('interactionCreate', async (interaction) => {
         updatePublicDash(gId);
     }
 });
-
 
 
 async function updatePublicDash(gId) {
@@ -491,14 +491,13 @@ async function updateLiveAdminDash(gId) {
     }
 }
 
-async function sendPublicDashboardMsg(channel, guildId) {
+function sendPublicDashboardMsg(channel, guildId) {
     const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('btn_start').setLabel('ENTRAR').setStyle(ButtonStyle.Success).setEmoji('🟢'),
         new ButtonBuilder().setCustomId('btn_stop').setLabel('SALIR').setStyle(ButtonStyle.Danger).setEmoji('🔴')
     );
     const emb = new EmbedBuilder().setTitle('⏱️ Control de Asistencia').setDescription('Cargando...').setColor(0x5865F2);
-    await channel.send({ embeds: [emb], components: [row] });
-    updatePublicDash(guildId); // Llenar con datos
+    channel.send({ embeds: [emb], components: [row] }).then(() => updatePublicDash(guildId));
 }
 
 function refreshAllLiveDashboards() {
@@ -515,7 +514,6 @@ async function checkAutoSchedules() {
         
         if(tz.format('dddd') === map[dayInput] && tz.format('HH:mm') === config.autoCut.time){
             console.log(`⏰ Ejecutando Auto-Cierre para guild: ${config.guildId}`);
-            
             config.isFrozen = true;
             await config.save();
 
@@ -527,13 +525,14 @@ async function checkAutoSchedules() {
                 session.endTime = now;
                 await session.save();
                 const dur = calculateDuration(session, now);
-                 if(logCh) logCh.send({embeds:[new EmbedBuilder().setDescription(`⚠️ **Auto-Cierre:** Sesión de <@${session.userId}> finalizada automáticamente.\nTiempo guardado: ${moment.duration(dur).format("h:mm")}`).setColor(0xFFA500)]});
+                 if(logCh) logCh.send({embeds:[new EmbedBuilder().setDescription(`⚠️ **Auto-Cierre:** Sesión de <@${session.userId}> finalizada automáticamente.\nTiempo guardado: ${moment.duration(dur).format("h:mm:ss")}`).setColor(0xFFA500)]});
             }
             updatePublicDash(config.guildId);
             updateLiveAdminDash(config.guildId);
         }
     }
 }
+
 process.on('SIGTERM', () => {
     console.log('SIGTERM recibido. Cerrando conexión DB y saliendo...');
     mongoose.connection.close(false, () => {
