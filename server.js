@@ -21,7 +21,7 @@ if (!dbURI) {
 }
 
 mongoose.connect(dbURI)
-    .then(() => console.log('🗄️ V21 Final DB Conectada.'))
+    .then(() => console.log('🗄️ V22 Final Polished DB Conectada.'))
     .catch(err => {
         console.error('❌ Error conectando a MongoDB:', err);
         process.exit(1);
@@ -29,19 +29,19 @@ mongoose.connect(dbURI)
 
 const GuildConfigSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
-    mode: { type: Number, default: 2 },
+    mode: { type: Number, default: 2 }, 
     dashChannelId: String,        
     supervisorChannelId: String,  
-    logChannelId: String,         
+    logChannelId: String,        
     configChannelId: String,
     timezone: String,
     adminRoles: [String],
     rolePermissions: [{ takerRoleId: String, targetRoleIds: [String] }],
     autoCut: { day: String, time: String },
     isFrozen: { type: Boolean, default: false },
-    liveDashboardMsgId: String,      
+    liveDashboardMsgId: String,       
     supervisorDashboardMsgId: String, 
-    publicDashboardMsgId: String    
+    publicDashboardMsgId: String     
 });
 const GuildConfig = mongoose.model('GuildConfig', GuildConfigSchema);
 
@@ -68,18 +68,18 @@ UserStateSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 const UserState = mongoose.model('UserState', UserStateSchema);
 
 const app = express();
-app.get('/', (req, res) => res.send('Bot V21 Final Activo.'));
+app.get('/', (req, res) => res.send('Bot V22 Final Activo.'));
 app.get('/ping', (req, res) => res.status(200).send('Pong!'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-    presence: { status: 'online', activities: [{ name: '!guia | V21', type: ActivityType.Watching }] }
+    presence: { status: 'online', activities: [{ name: '!guia | V22', type: ActivityType.Watching }] }
 });
 
 const rateLimits = new Map();
-const SPAM_COOLDOWN = 3000;
+const SPAM_COOLDOWN = 1000; 
 const setupCache = new Map();
 const TIMEZONES = [{ label: '🇲🇽 México', value: 'America/Mexico_City' }, { label: '🇨🇴/🇵🇪 Colombia', value: 'America/Bogota' }, { label: '🇦🇷/🇨🇱 Argentina', value: 'America/Argentina/Buenos_Aires' }, { label: '🇪🇸 España', value: 'Europe/Madrid' }, { label: '🇺🇸 USA (NY)', value: 'America/New_York' }];
 
@@ -199,9 +199,8 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
         } catch (e) { reject(e); }
     });
 }
-
 client.on('ready', () => {
-    console.log(`🤖 V21 Final Online: ${client.user.tag}`);
+    console.log(`🤖 V22 Final Online: ${client.user.tag}`);
     setInterval(checkAutoSchedules, 60000);
     setInterval(updateAllDashboardsGlobal, 30000);
     updateAllDashboardsGlobal();
@@ -211,9 +210,6 @@ function updateAllDashboardsGlobal() {
     client.guilds.cache.forEach(g => updateAllDashboards(g.id));
 }
 
-// ==========================================
-// 💬 COMANDOS
-// ==========================================
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
 
@@ -239,7 +235,7 @@ client.on('messageCreate', async (m) => {
                 { name: '👮 Para Administradores', value: '`!run`: Configuración.\n`!nomina`: Ver pagos y PDFs.\n`!time @user`: Historial y Ajustes.\n`!multar` / `!ban`: Sanciones.' },
                 { name: '👥 Operación', value: '`!mitiempo`: Tu acumulado (DM).\n`!tomar @user`: Iniciar tiempo (Supervisores).\nTambién puedes usar los paneles interactivos.' }
             )
-            .setFooter({ text: 'Tiempillo System V21 Final' });
+            .setFooter({ text: 'Tiempillo System V22 Final' });
         m.reply({ embeds: [guiaEmbed] });
     }
 
@@ -284,7 +280,6 @@ client.on('messageCreate', async (m) => {
             const totals = {};
             allSessions.forEach(s => { totals[s.userId] = (totals[s.userId] || 0) + calculateDuration(s); });
             const userIds = Object.keys(totals).filter(id => totals[id] > 0).sort((a,b) => totals[b] - totals[a]);
-            
             let desc = "**Nómina (Tiempos Acumulados)**\n"; let count = 0;
             for (const uid of userIds) {
                 const mem = await m.guild.members.fetch(uid).catch(()=>null);
@@ -292,7 +287,6 @@ client.on('messageCreate', async (m) => {
                 desc += `**${++count}. ${name}**: \`${moment.duration(totals[uid]).format("h[h] m[m]")}\`\n`;
             }
             if(count===0) desc="✅ Todo pagado.";
-            
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_nomina_pay').setLabel('Pagar (Reset)').setStyle(3).setEmoji('💸').setDisabled(count===0), new ButtonBuilder().setCustomId('btn_nomina_hist').setLabel('Reporte PDF').setStyle(1).setEmoji('📄').setDisabled(count===0));
             await m.channel.send({ embeds: [new EmbedBuilder().setTitle('💰 Gestión de Nómina').setDescription(desc.substring(0,4000)).setColor(0x2B2D31)], components: [row] });
         }
@@ -300,13 +294,12 @@ client.on('messageCreate', async (m) => {
         if (cmd==='!run') {
             const c = await GuildConfig.findOne({ guildId: m.guild.id });
             if(c) return m.reply({ embeds:[new EmbedBuilder().setTitle('⚠️ Ya Configurado').setDescription('Usa el botón para resetear.').setColor(0xFFA500)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_reset_config_confirm').setLabel('🔄 Resetear Configuración').setStyle(4))] });
-            
             const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_mode_select').setPlaceholder('Selecciona el Modo').addOptions(
                 { label: 'Usuarios toman time a usuarios', value: '1', emoji: '👮' },
                 { label: 'Usuarios se toman times solos', value: '2', emoji: '🤖' },
                 { label: 'Híbrido (Ambos)', value: '3', emoji: '✨' }
             ));
-            m.reply({ content: `👋 **Instalación V21**\nElige el modo de operación:`, components: [row] });
+            m.reply({ content: `👋 **Instalación V22**\nElige el modo de operación:`, components: [row] });
         }
 
         if (cmd==='!corte') { const c=await GuildConfig.findOne({guildId:m.guild.id}); const l=await client.channels.fetch(c.logChannelId).catch(()=>null); if(l){await l.send('✂️ CORTE'); m.reply('✅');} }
@@ -338,8 +331,8 @@ client.on('interactionCreate', async (i) => {
     }
     if (i.customId === 'setup_perm_add') {
         const r1 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_taker').setPlaceholder('Supervisor').setMaxValues(1));
-        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_target').setPlaceholder('Objetivos').setMinValues(1));
-        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_save').setLabel('Guardar').setStyle(3));
+        const r2 = new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_perm_target').setPlaceholder('Objetivos (Multi-Selección)').setMinValues(1).setMaxValues(10));
+        const r3 = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_save').setLabel('Guardar Regla').setStyle(3));
         await i.reply({ content: 'Nueva Regla:', components: [r1, r2, r3], ephemeral: true });
     }
     if(i.isRoleSelectMenu() && i.customId==='setup_perm_taker') { const c=setupCache.get(uId)||{}; c.tempTaker=i.values[0]; setupCache.set(uId,c); i.deferUpdate(); }
@@ -387,8 +380,6 @@ client.on('interactionCreate', async (i) => {
             await GuildConfig.findOneAndUpdate({ guildId: gId }, { mode: c.mode, dashChannelId: dashId, supervisorChannelId: supId, logChannelId: logId, configChannelId: i.channelId, timezone: c.timezone, adminRoles: c.adminRoles, rolePermissions: c.permissions || [], autoCut, isFrozen: false }, { upsert: true, new: true });
             
             if(dashId) { const ch = await i.guild.channels.fetch(dashId); sendPublicDashboardMsg(ch, gId); }
-            
-            // Iniciar Panel Supervisor (SOLO LISTA, SIN BOTONES)
             if(supId) { const ch = await i.guild.channels.fetch(supId); sendSupervisorDashboardMsg(ch, gId); }
             
             const logCh = await i.guild.channels.fetch(logId);
@@ -399,6 +390,24 @@ client.on('interactionCreate', async (i) => {
             await i.reply({ content: '✅ **Configuración Completada.**', ephemeral: true });
             try { if (i.message) i.message.delete(); } catch(e){}
         } catch(e) { i.reply(`Error: ${e.message}`); }
+    }
+
+    if(i.customId === 'btn_sup_take_time') i.reply({ content: 'Selecciona:', components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId('menu_sup_select_target').setMaxValues(1))], ephemeral: true });
+    if(i.isUserSelectMenu() && i.customId === 'menu_sup_select_target') {
+        const targetId = i.values[0]; 
+        if (targetId === i.user.id) return i.reply({ content: '⛔ No puedes tomarte tiempo a ti mismo en este modo.', ephemeral: true });
+
+        const c = await GuildConfig.findOne({ guildId: gId }); let can = false;
+        if (i.member.roles.cache.some(r => c.adminRoles.includes(r.id)) || i.user.id === i.guild.ownerId) can = true;
+        else if (c.rolePermissions?.length) { 
+            const tr = i.member.roles.cache.map(r => r.id); 
+            const tm = await i.guild.members.fetch(targetId).catch(()=>null); 
+            if(tm){ const ttr = tm.roles.cache.map(r => r.id); for (const r of c.rolePermissions) if (tr.includes(r.takerRoleId) && ttr.some(x => r.targetRoleIds.includes(x))) can = true; }
+        }
+        if (!can) return i.reply({content:'⛔ Sin rango.', ephemeral:true});
+        if (await WorkSession.findOne({ userId: targetId, guildId: gId, endTime: null })) return i.reply({content:'❌ Ya activo.', ephemeral:true});
+        await new WorkSession({ userId: targetId, guildId: gId, startedBy: i.user.id, startTime: new Date() }).save();
+        i.reply({content:`✅ Iniciado para <@${targetId}>.`, ephemeral:true}); updateAllDashboards(gId);
     }
 
     if (i.isStringSelectMenu() && i.customId.startsWith('menu_nomina_')) {
@@ -421,6 +430,22 @@ client.on('interactionCreate', async (i) => {
         }
     }
 
+    if(i.customId==='btn_nomina_pay'||i.customId==='btn_nomina_hist'){
+        if(!(await isAdmin(i.member, gId))) return i.reply('⛔');
+        const ss = await WorkSession.find({guildId:gId, endTime:{$ne:null}}); const tot={}; ss.forEach(s=>tot[s.userId]=(tot[s.userId]||0)+calculateDuration(s));
+        const u = Object.keys(tot).filter(k=>tot[k]>0).slice(0,25); if(!u.length) return i.reply({content:'Nadie pendiente.',ephemeral:true});
+        const opts=[]; for(const k of u){const m=await i.guild.members.fetch(k).catch(()=>null); opts.push({label:(m?m.displayName:k).substring(0,25),value:k});}
+        const mode = i.customId.split('_')[2];
+        i.reply({content:`Selecciona usuario:`, components:[new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`menu_nomina_${mode}`).addOptions(opts))], ephemeral:true});
+    }
+    if (i.isUserSelectMenu() && i.customId.startsWith('menu_trans_newsup_')) {
+        const tId = i.customId.split('_')[3]; const newSupId = i.values[0];
+        const oldS = await WorkSession.findOne({ userId: tId, guildId: gId, endTime: null });
+        if(!oldS) return i.reply({ content: 'Error.', ephemeral: true });
+        const now = new Date(); oldS.endTime = now; await oldS.save();
+        await new WorkSession({ userId: tId, guildId: gId, startedBy: newSupId, startTime: now }).save();
+        i.update({ content: `✅ **Transferido.**`, components: [] }); updateAllDashboards(gId);
+    }
     if(i.isButton() && i.customId.startsWith('live_ctl_')){
         if(i.customId==='live_ctl_transfer'){
             if(!(await isAdmin(i.member, gId))) return i.reply({content:'⛔', ephemeral:true});
@@ -435,23 +460,14 @@ client.on('interactionCreate', async (i) => {
     if (i.isStringSelectMenu() && i.customId === 'menu_trans_session') {
         const tId = i.values[0]; i.update({ content: `Transfiriendo <@${tId}>. Nuevo responsable:`, components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId(`menu_trans_newsup_${tId}`).setMaxValues(1))] });
     }
-    if (i.isUserSelectMenu() && i.customId.startsWith('menu_trans_newsup_')) {
-        const tId = i.customId.split('_')[3]; const newSupId = i.values[0];
-        const oldS = await WorkSession.findOne({ userId: tId, guildId: gId, endTime: null });
-        if(!oldS) return i.reply({ content: 'Error.', ephemeral: true });
-        const now = new Date(); oldS.endTime = now; await oldS.save();
-        await new WorkSession({ userId: tId, guildId: gId, startedBy: newSupId, startTime: now }).save();
-        i.update({ content: `✅ **Transferido.**`, components: [] }); updateAllDashboards(gId);
-    }
     if (i.isStringSelectMenu() && i.customId.startsWith('live_exec_')) {
         const act=i.customId.split('_')[2], t=i.values[0], s=await WorkSession.findOne({userId:t,guildId:gId,endTime:null}); if(!s)return i.update('Error.');
         if(act==='pause'){s.isPaused=!s.isPaused; if(!s.isPaused){s.totalPausedMs+=new Date()-s.pauseStartTime;s.pauseStartTime=null;}else{s.pauseStartTime=new Date();} await s.save();}
         if(act==='accumulate'){s.endTime=new Date(); await s.save();} if(act==='cancel'){await WorkSession.deleteOne({_id:s._id});}
         i.update({content:'✅ Hecho.',components:[]}); updateAllDashboards(gId);
     }
-
     if(i.customId==='btn_start'||i.customId==='btn_stop'){
-        const c=await GuildConfig.findOne({guildId:gId}); if(!c)return i.reply({content:'Error',ephemeral:true}); if(c.mode===1)return i.reply({content:'⛔ Solo supervisores.',ephemeral:true});
+        const c=await GuildConfig.findOne({guildId:gId}); if(!c)return i.reply({content:'Error',ephemeral:true}); if(c.mode===1)return i.reply({content:'⛔',ephemeral:true});
         if(i.customId==='btn_start'){
             if(c.isFrozen)return i.reply({content:'❄️',ephemeral:true}); const us=await UserState.findOne({userId:uId,guildId:gId}); if(us&&(us.isBanned||us.penaltyUntil>new Date()))return i.reply({content:'⛔',ephemeral:true});
             if(await WorkSession.findOne({userId:uId,guildId:gId,endTime:null}))return i.reply({content:'❌',ephemeral:true});
@@ -460,7 +476,6 @@ client.on('interactionCreate', async (i) => {
         if(i.customId==='btn_stop'){ const s=await WorkSession.findOne({userId:uId,guildId:gId,endTime:null}); if(!s)return i.reply({content:'❓',ephemeral:true}); await i.deferReply({ephemeral:true}); s.endTime=new Date(); await s.save(); i.editReply(`👋 ${moment.duration(calculateDuration(s)).format("h:mm")}`);}
         updateAllDashboards(gId);
     }
-
     if (i.isButton() && (i.customId.startsWith('btn_time_add_')||i.customId.startsWith('btn_time_sub_'))){
         if(!(await isAdmin(i.member,gId)))return i.reply('⛔'); const act=i.customId.split('_')[2], t=i.customId.split('_')[3];
         i.showModal(new ModalBuilder().setCustomId(`modal_adj_${act}_${t}`).setTitle('Ajustar').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('m').setLabel('Minutos').setStyle(1))));
@@ -476,39 +491,15 @@ client.on('interactionCreate', async (i) => {
     if(i.isStringSelectMenu() && i.customId.startsWith('menu_penalty_')){ const t=i.customId.split('_')[2], min=parseInt(i.values[0]), u=moment().add(min,'m').toDate(); await UserState.findOneAndUpdate({userId:t,guildId:gId},{penaltyUntil:u,isBanned:false},{upsert:true}); i.update({content:`✅ Multa.`, components:[]}); }
 });
 
-async function generateActiveList(guildId, guild) {
-    const active = await WorkSession.find({ guildId: guildId, endTime: null });
-    if (!active.length) return "\n💤 **Sin actividad en este momento.**";
-
-    let list = "";
-    for (const s of active) {
-        const userMem = await guild.members.fetch(s.userId).catch(() => null);
-        const userName = userMem ? userMem.displayName : s.userId;
-
-        let infoSup = "Auto-Servicio";
-        if (s.startedBy !== s.userId) {
-            const supMem = await guild.members.fetch(s.startedBy).catch(() => null);
-            const supName = supMem ? supMem.displayName : s.startedBy;
-            infoSup = `👮 **Encargado:** ${supName}`;
-        }
-
-        const statusIcon = s.isPaused ? "⏸️ PAUSADO" : "🟢 ACTIVO";
-        list += `> 👤 **${userName}** | ${infoSup}\n` +
-                `> ${statusIcon} | ⏱️ Transcurrido: <t:${Math.floor(s.startTime / 1000)}:R>\n\n`;
-    }
-    return list;
-}
-
 async function updatePublicDash(gId, listText) {
     const config = await GuildConfig.findOne({ guildId: gId });
-    if (!config || !config.dashChannelId || (config.mode === 1)) return; // No se muestra en modo Supervisor
+    if (!config || !config.dashChannelId || (config.mode === 1)) return; 
     const ch = await client.channels.fetch(config.dashChannelId).catch(() => null);
     if (!ch) return;
 
     const emb = new EmbedBuilder().setTitle('⏱️ Fichar Asistencia').setDescription(`**Estado:** ${config.isFrozen?'❄️ Cerrado':'🟢 Abierto'}\n\n${listText}`).setColor(config.isFrozen?0x99AAB5:0x5865F2);
     const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_start').setLabel('ENTRAR').setStyle(3), new ButtonBuilder().setCustomId('btn_stop').setLabel('SALIR').setStyle(4));
     
-    // Buscar mensaje anterior o enviar nuevo
     const msgs = await ch.messages.fetch({ limit: 10 }).catch(()=>null);
     const lastMsg = msgs ? msgs.find(m => m.author.id === client.user.id && m.components.length > 0) : null;
     if (lastMsg) lastMsg.edit({ embeds: [emb], components: [row] });
@@ -523,7 +514,7 @@ async function updateSupervisorDash(gId, listText) {
 
     const emb = new EmbedBuilder().setTitle('👮 Panel Supervisor').setDescription("**Tiempos Activos**\n" + listText + "\n\nUse `!tomar @usuario` para iniciar.").setColor(0xE67E22);
     
-    try { const m = await ch.messages.fetch(config.supervisorDashboardMsgId); await m.edit({ embeds: [emb], components: [] }); } // SIN BOTONES
+    try { const m = await ch.messages.fetch(config.supervisorDashboardMsgId); await m.edit({ embeds: [emb], components: [] }); } 
     catch(e) { 
         const n = await ch.send({ embeds: [emb] }); 
         config.supervisorDashboardMsgId = n.id; await config.save(); 
@@ -561,7 +552,6 @@ async function updateAllDashboards(guildId) {
     await updateLiveAdminDash(guildId, listText);
 }
 
-// Envíos iniciales
 function sendPublicDashboardMsg(ch, gId) { ch.send({embeds:[new EmbedBuilder().setTitle('Cargando...')]}).then(()=>updateAllDashboards(gId)); }
 async function sendSupervisorDashboardMsg(ch, gId) {
     const m = await ch.send('Cargando Supervisor...');
