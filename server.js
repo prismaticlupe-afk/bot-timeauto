@@ -10,16 +10,10 @@ const fs = require('fs');
 require('moment-duration-format');
 const momentTimezone = require('moment-timezone');
 
-// --- SERVIDOR WEB ---
 const app = express();
 const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot V10.2 Explicativo Activo.'));
-
-app.get('/ping', (req, res) => {
-    res.status(200).send('Pong! 🏓');
-});
-// -------------------------------
-
+app.get('/', (req, res) => res.send('Bot V11 Publico Activo.'));
+app.get('/ping', (req, res) => { res.status(200).send('Pong! 🏓'); });
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 // --- CLIENTE DISCORD ---
@@ -44,9 +38,6 @@ const TIMEZONES = [
     { label: '🇺🇸 USA (New York)', value: 'America/New_York' }
 ];
 
-// ==========================================
-// 🚀 INICIO CON AUTO-RESTAURACIÓN
-// ==========================================
 client.on('ready', async () => {
     console.log(`🤖 Bot Conectado: ${client.user.tag}`);
     const guilds = client.guilds.cache;
@@ -58,7 +49,6 @@ client.on('ready', async () => {
     setInterval(checkAutoSchedules, 60000);
 });
 
-// --- FUNCIÓN DE RESTAURACIÓN ---
 async function restoreSessionsFromChat(guild, config) {
     const logChannel = await guild.channels.fetch(config.logId).catch(() => null);
     if (!logChannel) return;
@@ -96,9 +86,6 @@ async function restoreSessionsFromChat(guild, config) {
 }
 
 
-// ==========================================
-// 🛡️ SEGURIDAD Y CONFIG
-// ==========================================
 function isRateLimited(userId) {
     const now = Date.now();
     const last = rateLimits.get(userId);
@@ -107,20 +94,23 @@ function isRateLimited(userId) {
     return false;
 }
 
-async function saveConfigToChannel(guild, config) {
-    const channel = await guild.channels.fetch(config.dashId).catch(() => null);
-    if (!channel) return { success: false, error: 'El Canal ID Botones no existe' };
+async function saveConfigToChannel(guild, targetChannelId, config) {
+    const configChannel = await guild.channels.fetch(targetChannelId).catch(() => null);
+    if (!configChannel) return { success: false, error: 'No se pudo acceder al canal actual para guardar la configuración.' };
     
+    const dashCheck = await guild.channels.fetch(config.dashId).catch(() => null);
+    if (!dashCheck) return { success: false, error: 'El Canal ID Botones no existe o no tengo permisos.' };
+
     const logCheck = await guild.channels.fetch(config.logId).catch(() => null);
-    if (!logCheck) return { success: false, error: 'El Canal ID Logs no existe' };
+    if (!logCheck) return { success: false, error: 'El Canal ID Logs no existe o no tengo permisos.' };
 
     const configString = JSON.stringify(config);
-    const secretTopic = `🔒 CONFIG_BOT [${configString}] (No borrar descripción)`;
+    const secretTopic = `🔒 CONFIG_BOT [${configString}] (No borrar esta descripción para que el bot recuerde)`;
     try {
-        await channel.setTopic(secretTopic);
+        await configChannel.setTopic(secretTopic);
         localConfig[guild.id] = config;
         return { success: true };
-    } catch (e) { return { success: false, error: 'Falta permiso "Gestionar Canal"' }; }
+    } catch (e) { return { success: false, error: 'Falta permiso "Gestionar Canal" en este canal de configuración.' }; }
 }
 
 async function recoverConfig(guild) {
@@ -193,32 +183,35 @@ function parseDurationToMs(s){ let ms=0; const r=/(\d+)\s*(h|m|s)/g; let m; whil
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
 
-    // --- COMANDO GUÍA ACTUALIZADO Y EXPLÍCITO ---
+    // --- COMANDO GUÍA PROFESIONAL ---
     if (message.content === '!guide' || message.content === '!guia') {
         const guideEmbed = new EmbedBuilder()
-            .setTitle('📘 Manual del Bot de Asistencia')
-            .setDescription('**¿Qué es este bot?**\nEs un "Reloj Checador". Sirve para que tu equipo registre sus horas de trabajo automáticamente usando botones.')
+            .setTitle('📘 Configuración Inicial del Bot')
+            .setDescription('Sigue estos pasos para configurar el sistema de asistencia de forma limpia y profesional.')
             .setColor(0xFEE75C)
             .addFields(
-                { name: '1. ¿Cómo funciona?', value: 'El bot publicará un panel con dos botones:\n🟢 **Entrar:** Inicia el cronómetro del turno.\n🔴 **Salir:** Detiene el cronómetro y guarda el tiempo trabajado en el historial.' },
-                { name: '2. Preparar Canales', value: 'Necesitas crear 2 canales de texto:\n`#fichar` (Donde pondremos el panel con los botones).\n`#logs` (Donde se guardará el historial de horas).' },
-                { name: '3. Obtener IDs (Importante)', value: 'Para configurar, necesitas las "IDs" de esos canales:\n- Ve a Ajustes -> Avanzado -> **Activa Modo Desarrollador**.\n- Clic derecho en `#fichar` -> Copiar ID.\n- Clic derecho en `#logs` -> Copiar ID.' },
-                { name: '4. Instalación Final', value: 'Escribe `!run`. El bot te pedirá la Zona Horaria, Roles de Jefe y que pegues las IDs que copiaste en el paso anterior.' }
+                { name: 'Paso 1: Crear Canales Necesarios', value: 'Necesitas 3 canales de texto:\n\n🔒 `#config-bot` (Hazlo privado solo para Admins. Aquí se guardará la configuración).\n📣 `#fichar` (Público para empleados. Aquí aparecerán los botones).\n📜 `#logs` (Privado para Admins. Historial de registros).' },
+                { name: 'Paso 2: Obtener las IDs (Modo Desarrollador)', value: '1. Ve a Ajustes de Usuario -> Avanzado -> **Activa Modo Desarrollador**.\n2. Clic derecho al canal `#fichar` -> "Copiar ID".\n3. Clic derecho al canal `#logs` -> "Copiar ID".' },
+                { name: 'Paso 3: Ejecutar Instalación', value: '1. **Ve al canal privado `#config-bot`** que creaste.\n2. Escribe el comando `!run` allí.\n3. Sigue las instrucciones del menú e introduce las IDs que copiaste.' },
+                { name: 'Resultado', value: 'El bot guardará la configuración oculta en la descripción de `#config-bot` y enviará el panel de botones visible a `#fichar`.' }
             )
-            .setFooter({ text: 'Usa !run cuando tengas los canales listos.' });
+            .setFooter({ text: 'Solo el dueño del servidor puede ejecutar !run' });
         return message.reply({ embeds: [guideEmbed] });
     }
 
     if (message.content === '!help') {
-        return message.reply({ embeds: [new EmbedBuilder().setTitle('Ayuda').setColor(0x5865F2).addFields({ name: 'Comandos', value: '`!guia` (Explica qué es el bot y cómo usarlo)\n`!run` (Instala el panel de botones)\n`!time @Usuario` (Ve cuánto ha trabajado alguien)\n`!corte` (Limpia el historial)' })] });
+        return message.reply({ embeds: [new EmbedBuilder().setTitle('Ayuda').setColor(0x5865F2).addFields({ name: 'Comandos', value: '`!guia` (Instrucciones de instalación)\n`!run` (Configurar desde canal privado)\n`!time @Usuario` (Ver horas trabajadas)\n`!corte` (Cerrar periodo y limpiar historial)' })] });
     }
 
     if (message.content === '!run') {
         if (message.author.id !== message.guild.ownerId) return message.reply('❌ Solo el Dueño del servidor (Owner) puede usar esto.');
+        if (message.channel.permissionsFor(message.guild.roles.everyone).has(PermissionsBitField.Flags.ViewChannel)) {
+             message.reply('⚠️ **Recomendación:** Es mejor usar este comando en un canal privado (ej. `#config-bot`) para mantener oculta la configuración técnica.');
+        }
         message.delete().catch(()=>{});
         const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('sys_setup_trigger').setLabel('⚙️ Iniciar Instalación').setStyle(ButtonStyle.Success));
-        const msg = await message.channel.send({ content: `👋 **Menú de Instalación**\n¿Ya leíste la guía (`+`!guia`+`)?\nTen a mano las IDs de tus canales.`, components: [row] });
-        setTimeout(() => msg.delete().catch(()=>{}), 60000);
+        const msg = await message.channel.send({ content: `👋 **Menú de Instalación**\nAsegúrate de tener las IDs de los canales #fichar y #logs.\n(Usa \`!guia\` si tienes dudas).`, components: [row] });
+        setTimeout(() => msg.delete().catch(()=>{}), 60000 * 5); // 5 minutos para configurar
         return;
     }
 
@@ -233,7 +226,7 @@ client.on('messageCreate', async (message) => {
         if (logCh) {
             await logCh.send('✂️ CORTE DE CAJA | -----------------------------------');
             await logCh.send(`> *Corte realizado por: ${message.author}* (El tiempo anterior ya no cuenta para el pago/reporte)`);
-            message.reply('✅ Corte marcado correctamente.');
+            message.reply('✅ Corte marcado correctamente en los logs.');
         }
     }
 
@@ -284,11 +277,10 @@ client.on('interactionCreate', async (interaction) => {
     }
     if (interaction.isButton() && interaction.customId === 'btn_continue_setup') {
         const m = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Configuración de Canales');
-        // ETIQUETAS EXPLÍCITAS
         m.addComponents(
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID del Canal BOTONES (Donde se ficha)").setPlaceholder("Ej: 129384...").setStyle(TextInputStyle.Short)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID del Canal HISTORIAL (Donde se guarda)").setPlaceholder("Ej: 938475...").setStyle(TextInputStyle.Short)),
-            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Auto-Cierre (Opcional)").setPlaceholder("Ej: lunes 23:59 (O dejar vacío)").setStyle(TextInputStyle.Short).setRequired(false))
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID del Canal Público (fichar)").setPlaceholder("Ej: 129384...").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID del Canal Privado (logs)").setPlaceholder("Ej: 938475...").setStyle(TextInputStyle.Short)),
+            new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Auto-Cierre (Opcional)").setPlaceholder("Ej: lunes 23:59").setStyle(TextInputStyle.Short).setRequired(false))
         );
         await interaction.showModal(m);
     }
@@ -300,11 +292,14 @@ client.on('interactionCreate', async (interaction) => {
         if(!pre || !pre.timezone) return interaction.reply({content:'⚠️ Faltó seleccionar la Zona Horaria.', ephemeral:true});
         let autoCut = null; if (autoRaw && autoRaw.includes(' ')) { const p = autoRaw.split(' '); autoCut = { day: p[0], time: p[1] }; }
         const newConfig = { dashId, logId, timezone: pre.timezone, adminRoles: pre.adminRoles, autoCut };
-        const res = await saveConfigToChannel(interaction.guild, newConfig);
+        
+        const res = await saveConfigToChannel(interaction.guild, interaction.channelId, newConfig);
+        
         const ch = await interaction.guild.channels.fetch(dashId).catch(()=>null);
         if (ch) sendDashboard(ch, interaction.guild.id);
-        if(res.success) await interaction.reply({ content: '✅ **Instalación Correcta**. Panel enviado al canal elegido.', ephemeral: true });
-        else await interaction.reply({ content: `⚠️ Error: ${res.error}.`, ephemeral: true });
+        
+        if(res.success) await interaction.reply({ content: `✅ **Instalación Correcta**.\n\n1. La configuración se ha guardado en la descripción de este canal (${interaction.channel}).\n2. El panel de botones se ha enviado al canal <#${dashId}>.`, ephemeral: true });
+        else await interaction.reply({ content: `⚠️ Error: ${res.error}. Asegúrate de que el bot tenga permisos para ver los canales y gestionar este canal.`, ephemeral: true });
     }
 
     // ACUMULAR
