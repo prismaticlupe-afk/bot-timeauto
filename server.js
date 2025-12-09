@@ -16,32 +16,32 @@ const axios = require('axios');
 
 const dbURI = process.env.MONGO_URI;
 if (!dbURI) {
-    console.error("❌ ERROR CRÍTICO: Falta la variable MONGO_URI en el archivo .env o en la configuración.");
+    console.error("❌ ERROR CRÍTICO: Falta la variable MONGO_URI.");
     process.exit(1);
 }
 
 mongoose.connect(dbURI)
-    .then(() => console.log('🗄️ Base de Datos V19 (Final) Conectada.'))
+    .then(() => console.log('🗄️ V21 Final DB Conectada.'))
     .catch(err => {
         console.error('❌ Error conectando a MongoDB:', err);
         process.exit(1);
     });
 
-
 const GuildConfigSchema = new mongoose.Schema({
     guildId: { type: String, required: true, unique: true },
-    mode: { type: Number, default: 2 }, 
-    dashChannelId: String, 
-    supervisorChannelId: String, 
-    logChannelId: String, 
+    mode: { type: Number, default: 2 },
+    dashChannelId: String,        
+    supervisorChannelId: String,  
+    logChannelId: String,         
     configChannelId: String,
     timezone: String,
     adminRoles: [String],
     rolePermissions: [{ takerRoleId: String, targetRoleIds: [String] }],
     autoCut: { day: String, time: String },
     isFrozen: { type: Boolean, default: false },
-    liveDashboardMsgId: String,
-    supervisorDashboardMsgId: String
+    liveDashboardMsgId: String,      
+    supervisorDashboardMsgId: String, 
+    publicDashboardMsgId: String    
 });
 const GuildConfig = mongoose.model('GuildConfig', GuildConfigSchema);
 
@@ -68,54 +68,51 @@ UserStateSchema.index({ userId: 1, guildId: 1 }, { unique: true });
 const UserState = mongoose.model('UserState', UserStateSchema);
 
 const app = express();
-app.get('/', (req, res) => res.send('Bot Tiempillo V19 Activo.'));
+app.get('/', (req, res) => res.send('Bot V21 Final Activo.'));
 app.get('/ping', (req, res) => res.status(200).send('Pong!'));
 const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Web lista en puerto ${port}`));
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
-    presence: { status: 'online', activities: [{ name: '!guia | Tiempillo', type: ActivityType.Watching }] }
+    presence: { status: 'online', activities: [{ name: '!guia | V21', type: ActivityType.Watching }] }
 });
 
 const rateLimits = new Map();
 const SPAM_COOLDOWN = 3000;
 const setupCache = new Map();
+const TIMEZONES = [{ label: '🇲🇽 México', value: 'America/Mexico_City' }, { label: '🇨🇴/🇵🇪 Colombia', value: 'America/Bogota' }, { label: '🇦🇷/🇨🇱 Argentina', value: 'America/Argentina/Buenos_Aires' }, { label: '🇪🇸 España', value: 'Europe/Madrid' }, { label: '🇺🇸 USA (NY)', value: 'America/New_York' }];
 
-const TIMEZONES = [
-    { label: '🇲🇽 México (Centro)', value: 'America/Mexico_City' },
-    { label: '🇨🇴/🇵🇪 Colombia/Perú', value: 'America/Bogota' },
-    { label: '🇦🇷/🇨🇱 Argentina/Chile', value: 'America/Argentina/Buenos_Aires' },
-    { label: '🇪🇸 España', value: 'Europe/Madrid' },
-    { label: '🇺🇸 USA (New York)', value: 'America/New_York' }
-];
-
-function isRateLimited(userId) {
-    const now = Date.now();
-    const last = rateLimits.get(userId);
-    if (last && (now - last < SPAM_COOLDOWN)) return true;
-    rateLimits.set(userId, now);
-    return false;
+function isRateLimited(id) { const n=Date.now(),l=rateLimits.get(id); if(l&&(n-l<SPAM_COOLDOWN))return true; rateLimits.set(id,n); return false; }
+async function isAdmin(mem, gId) { const c=await GuildConfig.findOne({guildId:gId}); if(!c)return false; return mem.roles.cache.some(r=>c.adminRoles.includes(r.id)) || mem.id===mem.guild.ownerId; }
+function calculateDuration(s, end=new Date()) {
+    const ep=s.endTime||end; let t=ep-s.startTime;
+    let cp=0; if(s.isPaused&&s.pauseStartTime&&!s.endTime) cp=end-s.pauseStartTime;
+    return t-s.totalPausedMs-cp+(s.manualAdjustmentMs||0);
 }
+function getHabboHeadUrl(username) { return `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&direction=2&head_direction=2&action=&gesture=nrm&size=s&headonly=1`; }
 
-async function isAdmin(interactionMember, guildId) {
-    const config = await GuildConfig.findOne({ guildId: guildId });
-    if (!config) return false;
-    return interactionMember.roles.cache.some(r => config.adminRoles.includes(r.id)) || interactionMember.id === interactionMember.guild.ownerId;
-}
+async function generateActiveList(guildId, guild) {
+    const active = await WorkSession.find({ guildId: guildId, endTime: null });
+    if (!active.length) return "\n💤 **Sin actividad en este momento.**";
 
-function calculateDuration(session, referenceEndDate = new Date()) {
-    const endPoint = session.endTime || referenceEndDate;
-    let totalElapsed = endPoint - session.startTime;
-    let currentPauseDuration = 0;
-    if (session.isPaused && session.pauseStartTime && !session.endTime) {
-        currentPauseDuration = referenceEndDate - session.pauseStartTime;
+    let list = "";
+    for (const s of active) {
+        const userMem = await guild.members.fetch(s.userId).catch(() => null);
+        const userName = userMem ? userMem.displayName : s.userId;
+
+        let infoSup = "Auto-Servicio";
+        if (s.startedBy !== s.userId) {
+            const supMem = await guild.members.fetch(s.startedBy).catch(() => null);
+            const supName = supMem ? supMem.displayName : s.startedBy;
+            infoSup = `👮 **Encargado:** ${supName}`;
+        }
+
+        const statusIcon = s.isPaused ? "⏸️ PAUSADO" : "🟢 ACTIVO";
+        list += `> 👤 **${userName}** | ${infoSup}\n` +
+                `> ${statusIcon} | ⏱️ Transcurrido: <t:${Math.floor(s.startTime / 1000)}:R>\n\n`;
     }
-    return totalElapsed - session.totalPausedMs - currentPauseDuration + (session.manualAdjustmentMs || 0);
-}
-
-function getHabboHeadUrl(username) {
-    return `https://www.habbo.es/habbo-imaging/avatarimage?user=${encodeURIComponent(username)}&direction=2&head_direction=2&action=&gesture=nrm&size=s&headonly=1`;
+    return list;
 }
 
 async function generateHistoryPDF(userId, guildId, username, sessions, timezone, guild) {
@@ -126,35 +123,23 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
             doc.on('data', buffers.push.bind(buffers));
             doc.on('end', () => resolve(Buffer.concat(buffers)));
 
-            const primaryColor = '#2c3e50'; 
-            const secondaryColor = '#7f8c8d'; 
-            const headerBg = '#ecf0f1'; 
-
             try {
                 const imgRes = await axios.get(getHabboHeadUrl(username), { responseType: 'arraybuffer', timeout: 1500 });
                 doc.image(imgRes.data, (doc.page.width / 2) - 20, 30, { width: 40 });
             } catch (e) {}
 
             doc.moveDown(3);
-            
-            doc.font('Helvetica-Bold').fontSize(22).fillColor(primaryColor)
-               .text(`AGENCIA ${guild.name.toUpperCase()}`, { align: 'center' });
-            
-            doc.font('Helvetica-Oblique').fontSize(10).fillColor(secondaryColor)
-               .text('Sistema de historial de tiempo acumulado', { align: 'center' });
-            
+            doc.font('Helvetica-Bold').fontSize(22).fillColor('#2c3e50').text(`AGENCIA ${guild.name.toUpperCase()}`, { align: 'center' });
+            doc.font('Helvetica-Oblique').fontSize(10).fillColor('#7f8c8d').text('Sistema de historial de tiempo acumulado', { align: 'center' });
             doc.moveDown(0.5);
-            doc.font('Helvetica').fontSize(12).fillColor('black')
-               .text(`Reporte de Asistencia: ${username}`, { align: 'center' });
+            doc.font('Helvetica').fontSize(12).fillColor('black').text(`Reporte de: ${username}`, { align: 'center' });
             doc.fontSize(10).text(`Generado: ${moment().format('DD/MM/YYYY HH:mm')}`, { align: 'center' });
-            
             doc.moveDown(2);
 
-            const startX = 40; 
-            let currentY = doc.y;
+            const startX = 40; let currentY = doc.y;
             const colWidths = { fecha: 60, inicio: 50, fin: 50, dur: 70, tipo: 130, status: 60, avatar: 40 };
             
-            doc.rect(startX, currentY, 520, 20).fill(headerBg);
+            doc.rect(startX, currentY, 520, 20).fill('#ecf0f1');
             doc.fillColor('black').font('Helvetica-Bold').fontSize(9);
             let cx = startX + 5;
             doc.text('FECHA', cx, currentY + 5); cx += colWidths.fecha;
@@ -165,30 +150,23 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
             doc.text('ESTADO', cx, currentY + 5); cx += colWidths.status;
             doc.text('AVATAR', cx, currentY + 5);
 
-            currentY += 25; 
-            doc.font('Helvetica').fontSize(9);
-
+            currentY += 25; doc.font('Helvetica').fontSize(9);
             let totalMs = 0;
 
             for(const s of sessions) {
                 if (currentY > 750) { doc.addPage(); currentY = 50; }
-                
-                const dur = calculateDuration(s); 
-                totalMs += dur;
+                const dur = calculateDuration(s); totalMs += dur;
                 const tz = timezone || 'UTC';
                 
                 let initiatorName = "Auto-Servicio";
                 let initiatorAvatarUrl = null;
-
                 if (s.startedBy !== s.userId) {
                     if(guild) {
                         const sup = await guild.members.fetch(s.startedBy).catch(()=>null);
                         initiatorName = sup ? sup.displayName : `ID: ${s.startedBy}`;
                     } else initiatorName = s.startedBy;
                     initiatorAvatarUrl = getHabboHeadUrl(initiatorName);
-                } else {
-                    initiatorAvatarUrl = getHabboHeadUrl(username);
-                }
+                } else initiatorAvatarUrl = getHabboHeadUrl(username);
 
                 const dateStr = moment(s.startTime).tz(tz).format('DD/MM/YY');
                 const startStr = moment(s.startTime).tz(tz).format('HH:mm');
@@ -210,34 +188,32 @@ async function generateHistoryPDF(userId, guildId, username, sessions, timezone,
                         doc.image(headRes.data, cx, currentY - 5, { width: 18 });
                     } catch (e) { doc.text('-', cx, currentY); }
                 }
-
                 doc.moveTo(startX, currentY + 15).lineTo(560, currentY + 15).lineWidth(0.5).strokeColor('#ecf0f1').stroke();
                 doc.strokeColor('black');
-
                 currentY += 20;
             }
-
             doc.moveDown(2);
-            doc.rect(startX, currentY, 200, 30).fill(headerBg);
-            doc.fillColor('black').font('Helvetica-Bold').fontSize(14)
-               .text(`TOTAL ACUMULADO: ${moment.duration(totalMs).format("h[h] m[m]")}`, startX + 10, currentY + 8);
-
+            doc.rect(startX, currentY, 200, 30).fill('#ecf0f1');
+            doc.fillColor('black').font('Helvetica-Bold').fontSize(14).text(`TOTAL ACUMULADO: ${moment.duration(totalMs).format("h[h] m[m]")}`, startX + 10, currentY + 8);
             doc.end();
         } catch (e) { reject(e); }
     });
 }
 
 client.on('ready', () => {
-    console.log(`🤖 TIEMPILLO V19 Online: ${client.user.tag}`);
+    console.log(`🤖 V21 Final Online: ${client.user.tag}`);
     setInterval(checkAutoSchedules, 60000);
-    setInterval(refreshAllLiveDashboards, 30000);
-    
-    client.guilds.cache.forEach(g => {
-        updatePublicDash(g.id);
-        updateLiveAdminDash(g.id); 
-    });
+    setInterval(updateAllDashboardsGlobal, 30000);
+    updateAllDashboardsGlobal();
 });
 
+function updateAllDashboardsGlobal() {
+    client.guilds.cache.forEach(g => updateAllDashboards(g.id));
+}
+
+// ==========================================
+// 💬 COMANDOS
+// ==========================================
 client.on('messageCreate', async (m) => {
     if (m.author.bot) return;
 
@@ -255,33 +231,29 @@ client.on('messageCreate', async (m) => {
     if (m.content === '!guide' || m.content === '!guia') {
         const guiaEmbed = new EmbedBuilder()
             .setTitle('✨ Bienvenido a TIEMPILLO')
-            .setDescription('Hola, soy **Tiempillo**, tu asistente profesional para la gestión de nóminas y control de asistencia en tu agencia.\n\nEste sistema permite llevar un registro exacto de las horas trabajadas, gestionar pausas y generar reportes detallados.')
-            .setColor(0x00A8FF) // Un azul bonito
+            .setDescription('Sistema profesional para la gestión de nóminas y control de asistencia.\nLlevamos un registro exacto de las horas trabajadas, gestionamos pausas y generamos reportes PDF con avatares.')
+            .setColor(0x00A8FF)
             .setThumbnail('https://www.habbo.com/habbo-imaging/avatarimage?figure=hr-890-45-.hd-600-3-.ch-685-77-.lg-705-81-.sh-730-62-.ca-1810-undefined-.wa-2007-undefined-&gender=M&direction=4&head_direction=2&action=wav&gesture=nrm&size=m')
             .addFields(
-                { name: '🚀 Primeros Pasos (Configuración)', value: 'Para empezar, el dueño del servidor debe crear los canales necesarios y ejecutar `!run`.\n\n**Canales Requeridos:**\n`#fichar` (Público: Para que todos vean el panel)\n`#logs` (Privado: Panel de control para Admins)\n`#control-tiempos` (Opcional: Si usas modo Supervisor)' },
-                { name: '👮 Para Administradores', value: '`!run`: Configura o resetea el bot.\n`!nomina`: Muestra la lista de pagos pendientes y genera **PDFs**.\n`!time @user`: Ver historial detallado, sumar/restar tiempo o borrar datos.\n`!multar @user`: Aplica sanciones temporales.\n`!bantime @user`: Bloquea permanentemente al usuario.' },
-                { name: '👥 Para Usuarios / Supervisores', value: '`!mitiempo`: Te envía tu acumulado por mensaje privado.\n`!tomar @user`: Inicia el contador a otro usuario (Solo modo supervisor).' },
-                { name: '📄 Sistema de Reportes PDF', value: 'Al usar `!nomina` y seleccionar "Historial", recibirás un documento PDF profesional con el desglose de horas, fechas y los avatares de los encargados.' }
+                { name: '🚀 Inicio Rápido', value: 'Dueño: Crea los canales (`#fichar`, `#logs`, `#control-tiempos`) y usa `!run`.' },
+                { name: '👮 Para Administradores', value: '`!run`: Configuración.\n`!nomina`: Ver pagos y PDFs.\n`!time @user`: Historial y Ajustes.\n`!multar` / `!ban`: Sanciones.' },
+                { name: '👥 Operación', value: '`!mitiempo`: Tu acumulado (DM).\n`!tomar @user`: Iniciar tiempo (Supervisores).\nTambién puedes usar los paneles interactivos.' }
             )
-            .setFooter({ text: 'Tiempillo System V19 - Gestión Profesional' });
-
+            .setFooter({ text: 'Tiempillo System V21 Final' });
         m.reply({ embeds: [guiaEmbed] });
     }
 
     if (m.content.startsWith('!')) {
         const adminCmds = ['!run', '!corte', '!time', '!multar', '!bantime', '!activetime', '!nomina', '!tomar'];
-        const cmd = m.content.split(' ')[0]; 
-        if (!adminCmds.includes(cmd)) return;
+        const cmd = m.content.split(' ')[0]; if (!adminCmds.includes(cmd)) return;
         
         if (cmd === '!tomar') {
             const config = await GuildConfig.findOne({ guildId: m.guild.id });
             if (!config) return m.reply('⚠️ No configurado.');
-            if (config.mode !== 2 && config.supervisorChannelId && m.channel.id !== config.supervisorChannelId) return m.reply(`⚠️ Comando exclusivo de <#${config.supervisorChannelId}>.`);
+            if (config.mode !== 2 && config.supervisorChannelId && m.channel.id !== config.supervisorChannelId) return m.reply(`⚠️ Usa <#${config.supervisorChannelId}>.`);
             const target = m.mentions.users.first();
-            if (!target) return m.reply('⚠️ Uso: `!tomar @usuario`');
-
-            if (target.id === m.author.id) return m.reply('⛔ No puedes tomarte tiempo a ti mismo en este modo. Debe hacerlo otro supervisor.');
+            if (!target) return m.reply('⚠️ `!tomar @usuario`');
+            if (target.id === m.author.id) return m.reply('⛔ No puedes tomarte tiempo a ti mismo en este modo.');
 
             let canTake = false;
             if (m.member.roles.cache.some(r => config.adminRoles.includes(r.id)) || m.author.id === m.guild.ownerId) canTake = true;
@@ -295,15 +267,11 @@ client.on('messageCreate', async (m) => {
             if (!canTake) return m.reply('⛔ Sin rango suficiente.');
 
             const activeS = await WorkSession.findOne({ userId: target.id, guildId: m.guild.id, endTime: null });
-            if (activeS) {
-                const starterMember = await m.guild.members.fetch(activeS.startedBy).catch(()=>null);
-                return m.reply(`⚠️ Usuario con time activo.\n**Encargado:** ${starterMember ? starterMember.displayName : 'Desconocido'}`);
-            }
+            if (activeS) return m.reply(`⚠️ Ya activo.`);
 
             await new WorkSession({ userId: target.id, guildId: m.guild.id, startedBy: m.author.id, startTime: new Date() }).save();
             m.reply(`✅ **Tiempo iniciado** para ${target} por ${m.author}.`);
-            updateLiveAdminDash(m.guild.id); updatePublicDash(m.guild.id);
-            return;
+            updateAllDashboards(m.guild.id); return;
         }
 
         if(cmd==='!run' && m.author.id!==m.guild.ownerId) return m.reply('❌ Solo el Dueño puede configurar.');
@@ -331,14 +299,14 @@ client.on('messageCreate', async (m) => {
 
         if (cmd==='!run') {
             const c = await GuildConfig.findOne({ guildId: m.guild.id });
-            if(c) return m.reply({ embeds:[new EmbedBuilder().setTitle('⚠️ Configuración Existente').setDescription('El bot ya tiene datos.\nPara cambiar la configuración, presiona Resetear.').setColor(0xFFA500)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_reset_config_confirm').setLabel('🔄 Resetear Configuración').setStyle(4))] });
+            if(c) return m.reply({ embeds:[new EmbedBuilder().setTitle('⚠️ Ya Configurado').setDescription('Usa el botón para resetear.').setColor(0xFFA500)], components:[new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_reset_config_confirm').setLabel('🔄 Resetear Configuración').setStyle(4))] });
             
             const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_mode_select').setPlaceholder('Selecciona el Modo').addOptions(
-                { label: 'Usuarios toman time a usuarios', description: 'Requiere configurar jerarquía.', value: '1', emoji: '👮' },
-                { label: 'Usuarios se toman times solos', description: 'Sistema de botones públicos.', value: '2', emoji: '🤖' },
+                { label: 'Usuarios toman time a usuarios', value: '1', emoji: '👮' },
+                { label: 'Usuarios se toman times solos', value: '2', emoji: '🤖' },
                 { label: 'Híbrido (Ambos)', value: '3', emoji: '✨' }
             ));
-            m.reply({ content: `👋 **Instalación Tiempillo V19**\nElige cómo funcionará el sistema:`, components: [row] });
+            m.reply({ content: `👋 **Instalación V21**\nElige el modo de operación:`, components: [row] });
         }
 
         if (cmd==='!corte') { const c=await GuildConfig.findOne({guildId:m.guild.id}); const l=await client.channels.fetch(c.logChannelId).catch(()=>null); if(l){await l.send('✂️ CORTE'); m.reply('✅');} }
@@ -355,6 +323,7 @@ client.on('messageCreate', async (m) => {
         }
     }
 });
+
 client.on('interactionCreate', async (i) => {
     if (i.isButton() && isRateLimited(i.user.id)) return i.reply({ content: '⏳ ...', ephemeral: true });
     const gId = i.guild.id; const uId = i.user.id;
@@ -364,7 +333,7 @@ client.on('interactionCreate', async (i) => {
         const mode = parseInt(i.values[0]); setupCache.set(gId, { mode: mode, permissions: [] });
         if (mode === 1 || mode === 3) {
             const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('setup_perm_add').setLabel('Agregar Regla').setStyle(3), new ButtonBuilder().setCustomId('setup_perm_finish').setLabel('Terminar Permisos').setStyle(1));
-            await i.update({ content: `✅ Modo ${mode}.\n**Jerarquía:** Define quién toma time a quién.`, components: [row] });
+            await i.update({ content: `✅ Modo ${mode}.\nDefinir Jerarquía:`, components: [row] });
         } else triggerGeneralSetup(i);
     }
     if (i.customId === 'setup_perm_add') {
@@ -388,7 +357,7 @@ client.on('interactionCreate', async (i) => {
         const msg = "🔧 **Configuración General**";
         const r = [
             new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('setup_zone').setPlaceholder('Elige la Zona Horaria de tu Bot').addOptions(TIMEZONES)), 
-            new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('Roles Administradores (Multiselección)').setMinValues(1).setMaxValues(10)), 
+            new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('setup_roles').setPlaceholder('Roles Administradores').setMinValues(1).setMaxValues(10)), 
             new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_continue_setup_final').setLabel('Siguiente').setStyle(1))
         ];
         if(interaction.replied||interaction.deferred) await interaction.followUp({content:msg, components:r, ephemeral:true}); else await interaction.update({content:msg, components:r});
@@ -401,7 +370,7 @@ client.on('interactionCreate', async (i) => {
         const m = new ModalBuilder().setCustomId('setup_modal_final').setTitle('Canales y Horarios');
         m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('log').setLabel("ID Canal LOGS (Privado Admin)").setStyle(1)));
         m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('auto').setLabel("Corte Automático (Reseteo a 0)").setPlaceholder("Ej: lunes 00:00 (O escribe 'no')").setStyle(1).setRequired(false)));
-        if (c.mode !== 1) m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID Canal FICHAR (Público)").setStyle(1)));
+        if (c.mode !== 1) m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('dash').setLabel("ID Canal Fichar").setStyle(1)));
         if (c.mode !== 2) m.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sup').setLabel("ID Canal Control Tiempos").setStyle(1)));
         await i.showModal(m);
     }
@@ -410,39 +379,26 @@ client.on('interactionCreate', async (i) => {
         const c = setupCache.get(gId);
         const logId = i.fields.getTextInputValue('log');
         const autoRaw = i.fields.getTextInputValue('auto');
-        let autoCut = null; if (autoRaw?.includes(':') && !autoRaw.toLowerCase().includes('no')) { const p = autoRaw.split(' '); autoCut = { day: p[0], time: p[1] }; }
+        let autoCut = null; if (autoRaw?.includes(':')) { const p = autoRaw.split(' '); autoCut = { day: p[0], time: p[1] }; }
         let dashId = null, supId = null;
         try { if(c.mode!==1) dashId = i.fields.getTextInputValue('dash'); } catch(e){}
         try { if(c.mode!==2) supId = i.fields.getTextInputValue('sup'); } catch(e){}
         try {
             await GuildConfig.findOneAndUpdate({ guildId: gId }, { mode: c.mode, dashChannelId: dashId, supervisorChannelId: supId, logChannelId: logId, configChannelId: i.channelId, timezone: c.timezone, adminRoles: c.adminRoles, rolePermissions: c.permissions || [], autoCut, isFrozen: false }, { upsert: true, new: true });
+            
             if(dashId) { const ch = await i.guild.channels.fetch(dashId); sendPublicDashboardMsg(ch, gId); }
+            
+            // Iniciar Panel Supervisor (SOLO LISTA, SIN BOTONES)
+            if(supId) { const ch = await i.guild.channels.fetch(supId); sendSupervisorDashboardMsg(ch, gId); }
+            
             const logCh = await i.guild.channels.fetch(logId);
             const m = await logCh.send('Dashboard Admin Iniciado...');
             await GuildConfig.findOneAndUpdate({guildId: gId}, {liveDashboardMsgId: m.id});
-            updateLiveAdminDash(gId);
+            updateAllDashboards(gId);
             
             await i.reply({ content: '✅ **Configuración Completada.**', ephemeral: true });
             try { if (i.message) i.message.delete(); } catch(e){}
         } catch(e) { i.reply(`Error: ${e.message}`); }
-    }
-
-    if(i.customId === 'btn_sup_take_time') i.reply({ content: 'Selecciona:', components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId('menu_sup_select_target').setMaxValues(1))], ephemeral: true });
-    if(i.isUserSelectMenu() && i.customId === 'menu_sup_select_target') {
-        const targetId = i.values[0]; 
-        if (targetId === i.user.id) return i.reply({ content: '⛔ No puedes tomarte tiempo a ti mismo en este modo.', ephemeral: true });
-
-        const c = await GuildConfig.findOne({ guildId: gId }); let can = false;
-        if (i.member.roles.cache.some(r => c.adminRoles.includes(r.id)) || i.user.id === i.guild.ownerId) can = true;
-        else if (c.rolePermissions?.length) { 
-            const tr = i.member.roles.cache.map(r => r.id); 
-            const tm = await i.guild.members.fetch(targetId).catch(()=>null); 
-            if(tm){ const ttr = tm.roles.cache.map(r => r.id); for (const r of c.rolePermissions) if (tr.includes(r.takerRoleId) && ttr.some(x => r.targetRoleIds.includes(x))) can = true; }
-        }
-        if (!can) return i.reply({content:'⛔ Sin rango.', ephemeral:true});
-        if (await WorkSession.findOne({ userId: targetId, guildId: gId, endTime: null })) return i.reply({content:'❌ Ya activo.', ephemeral:true});
-        await new WorkSession({ userId: targetId, guildId: gId, startedBy: i.user.id, startTime: new Date() }).save();
-        i.reply({content:`✅ Iniciado para <@${targetId}>.`, ephemeral:true}); updateLiveAdminDash(gId); updatePublicDash(gId);
     }
 
     if (i.isStringSelectMenu() && i.customId.startsWith('menu_nomina_')) {
@@ -465,22 +421,6 @@ client.on('interactionCreate', async (i) => {
         }
     }
 
-    if(i.customId==='btn_nomina_pay'||i.customId==='btn_nomina_hist'){
-        if(!(await isAdmin(i.member, gId))) return i.reply('⛔');
-        const ss = await WorkSession.find({guildId:gId, endTime:{$ne:null}}); const tot={}; ss.forEach(s=>tot[s.userId]=(tot[s.userId]||0)+calculateDuration(s));
-        const u = Object.keys(tot).filter(k=>tot[k]>0).slice(0,25); if(!u.length) return i.reply({content:'Nadie pendiente.',ephemeral:true});
-        const opts=[]; for(const k of u){const m=await i.guild.members.fetch(k).catch(()=>null); opts.push({label:(m?m.displayName:k).substring(0,25),value:k});}
-        const mode = i.customId.split('_')[2];
-        i.reply({content:`Selecciona usuario:`, components:[new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`menu_nomina_${mode}`).addOptions(opts))], ephemeral:true});
-    }
-    if (i.isUserSelectMenu() && i.customId.startsWith('menu_trans_newsup_')) {
-        const tId = i.customId.split('_')[3]; const newSupId = i.values[0];
-        const oldS = await WorkSession.findOne({ userId: tId, guildId: gId, endTime: null });
-        if(!oldS) return i.reply({ content: 'Error.', ephemeral: true });
-        const now = new Date(); oldS.endTime = now; await oldS.save();
-        await new WorkSession({ userId: tId, guildId: gId, startedBy: newSupId, startTime: now }).save();
-        i.update({ content: `✅ **Transferido.**`, components: [] }); updateLiveAdminDash(gId); updatePublicDash(gId);
-    }
     if(i.isButton() && i.customId.startsWith('live_ctl_')){
         if(i.customId==='live_ctl_transfer'){
             if(!(await isAdmin(i.member, gId))) return i.reply({content:'⛔', ephemeral:true});
@@ -495,12 +435,21 @@ client.on('interactionCreate', async (i) => {
     if (i.isStringSelectMenu() && i.customId === 'menu_trans_session') {
         const tId = i.values[0]; i.update({ content: `Transfiriendo <@${tId}>. Nuevo responsable:`, components: [new ActionRowBuilder().addComponents(new UserSelectMenuBuilder().setCustomId(`menu_trans_newsup_${tId}`).setMaxValues(1))] });
     }
+    if (i.isUserSelectMenu() && i.customId.startsWith('menu_trans_newsup_')) {
+        const tId = i.customId.split('_')[3]; const newSupId = i.values[0];
+        const oldS = await WorkSession.findOne({ userId: tId, guildId: gId, endTime: null });
+        if(!oldS) return i.reply({ content: 'Error.', ephemeral: true });
+        const now = new Date(); oldS.endTime = now; await oldS.save();
+        await new WorkSession({ userId: tId, guildId: gId, startedBy: newSupId, startTime: now }).save();
+        i.update({ content: `✅ **Transferido.**`, components: [] }); updateAllDashboards(gId);
+    }
     if (i.isStringSelectMenu() && i.customId.startsWith('live_exec_')) {
         const act=i.customId.split('_')[2], t=i.values[0], s=await WorkSession.findOne({userId:t,guildId:gId,endTime:null}); if(!s)return i.update('Error.');
         if(act==='pause'){s.isPaused=!s.isPaused; if(!s.isPaused){s.totalPausedMs+=new Date()-s.pauseStartTime;s.pauseStartTime=null;}else{s.pauseStartTime=new Date();} await s.save();}
         if(act==='accumulate'){s.endTime=new Date(); await s.save();} if(act==='cancel'){await WorkSession.deleteOne({_id:s._id});}
-        i.update({content:'✅ Hecho.',components:[]}); updateLiveAdminDash(gId); if(s.userId===s.startedBy) updatePublicDash(gId);
+        i.update({content:'✅ Hecho.',components:[]}); updateAllDashboards(gId);
     }
+
     if(i.customId==='btn_start'||i.customId==='btn_stop'){
         const c=await GuildConfig.findOne({guildId:gId}); if(!c)return i.reply({content:'Error',ephemeral:true}); if(c.mode===1)return i.reply({content:'⛔ Solo supervisores.',ephemeral:true});
         if(i.customId==='btn_start'){
@@ -509,8 +458,9 @@ client.on('interactionCreate', async (i) => {
             await new WorkSession({userId:uId,guildId:gId,startedBy:uId,startTime:new Date()}).save(); i.reply({content:'✅',ephemeral:true});
         }
         if(i.customId==='btn_stop'){ const s=await WorkSession.findOne({userId:uId,guildId:gId,endTime:null}); if(!s)return i.reply({content:'❓',ephemeral:true}); await i.deferReply({ephemeral:true}); s.endTime=new Date(); await s.save(); i.editReply(`👋 ${moment.duration(calculateDuration(s)).format("h:mm")}`);}
-        updatePublicDash(gId); updateLiveAdminDash(gId);
+        updateAllDashboards(gId);
     }
+
     if (i.isButton() && (i.customId.startsWith('btn_time_add_')||i.customId.startsWith('btn_time_sub_'))){
         if(!(await isAdmin(i.member,gId)))return i.reply('⛔'); const act=i.customId.split('_')[2], t=i.customId.split('_')[3];
         i.showModal(new ModalBuilder().setCustomId(`modal_adj_${act}_${t}`).setTitle('Ajustar').addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('m').setLabel('Minutos').setStyle(1))));
@@ -526,65 +476,104 @@ client.on('interactionCreate', async (i) => {
     if(i.isStringSelectMenu() && i.customId.startsWith('menu_penalty_')){ const t=i.customId.split('_')[2], min=parseInt(i.values[0]), u=moment().add(min,'m').toDate(); await UserState.findOneAndUpdate({userId:t,guildId:gId},{penaltyUntil:u,isBanned:false},{upsert:true}); i.update({content:`✅ Multa.`, components:[]}); }
 });
 
-async function updatePublicDash(gId) {
-    const c=await GuildConfig.findOne({guildId:gId}); if(!c||!c.dashChannelId)return; const ch=await client.channels.fetch(c.dashChannelId).catch(()=>null); if(!ch)return;
-    const a=await WorkSession.find({guildId:gId,endTime:null}); 
-    
-    let l = "";
-    if (a.length === 0) {
-        l = '*Nadie activo*';
-    } else {
-        for (const s of a) {
-            const userMem = await ch.guild.members.fetch(s.userId).catch(()=>null);
-            const userName = userMem ? userMem.displayName : s.userId;
-            
-            let supInfo = "";
-            if (s.startedBy !== s.userId) {
-                const supMem = await ch.guild.members.fetch(s.startedBy).catch(()=>null);
-                const supName = supMem ? supMem.displayName : s.startedBy;
-                supInfo = ` | 👮 ${supName}`;
-            }
-            l += `• ${s.isPaused?'⏸️':'🟢'} **${userName}**${supInfo}\n`;
-        }
-    }
+async function generateActiveList(guildId, guild) {
+    const active = await WorkSession.find({ guildId: guildId, endTime: null });
+    if (!active.length) return "\n💤 **Sin actividad en este momento.**";
 
-    const emb=new EmbedBuilder().setTitle('⏱️ Panel de Asistencia').setDescription(`**Estado:** ${c.isFrozen?'❄️ Cerrado':'🟢 Abierto'}`).setColor(c.isFrozen?0x99AAB5:0x5865F2).addFields({name:'Usuarios Activos',value:l});
-    const row=new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_start').setLabel('ENTRAR').setStyle(3),new ButtonBuilder().setCustomId('btn_stop').setLabel('SALIR').setStyle(4));
-    const ms=await ch.messages.fetch({limit:5}); const b=ms.find(m=>m.author.id===client.user.id&&m.components.length>0); if(b)b.edit({embeds:[emb],components:[row]}); else ch.send({embeds:[emb],components:[row]});
+    let list = "";
+    for (const s of active) {
+        const userMem = await guild.members.fetch(s.userId).catch(() => null);
+        const userName = userMem ? userMem.displayName : s.userId;
+
+        let infoSup = "Auto-Servicio";
+        if (s.startedBy !== s.userId) {
+            const supMem = await guild.members.fetch(s.startedBy).catch(() => null);
+            const supName = supMem ? supMem.displayName : s.startedBy;
+            infoSup = `👮 **Encargado:** ${supName}`;
+        }
+
+        const statusIcon = s.isPaused ? "⏸️ PAUSADO" : "🟢 ACTIVO";
+        list += `> 👤 **${userName}** | ${infoSup}\n` +
+                `> ${statusIcon} | ⏱️ Transcurrido: <t:${Math.floor(s.startTime / 1000)}:R>\n\n`;
+    }
+    return list;
 }
 
-async function updateLiveAdminDash(gId) {
-    const c=await GuildConfig.findOne({guildId:gId}); if(!c||!c.liveDashboardMsgId||!c.logChannelId)return; const ch=await client.channels.fetch(c.logChannelId).catch(()=>null); if(!ch)return;
-    const a=await WorkSession.find({guildId:gId,endTime:null});
-    let d="**Panel Control en Vivo**\n\n"; 
-    if(!a.length) d+="\n💤 Sin actividad."; 
-    else {
-        for(const s of a) {
-            const userMem = await ch.guild.members.fetch(s.userId).catch(()=>null);
-            const userName = userMem ? userMem.displayName : s.userId;
-            let infoSup = "Auto";
-            if (s.startedBy !== s.userId) {
-                const supMem = await ch.guild.members.fetch(s.startedBy).catch(()=>null);
-                infoSup = `👮 ${supMem ? supMem.displayName : s.startedBy}`;
-            }
-            d+=`> 👤 **${userName}** | ${infoSup}\n` +
-               `> 🕒 **Estado:** ${s.isPaused?'⏸️ PAUSA':'🟢 ACTIVO'} (<t:${Math.floor(s.startTime/1000)}:R>)\n\n`;
-        }
+async function updatePublicDash(gId, listText) {
+    const config = await GuildConfig.findOne({ guildId: gId });
+    if (!config || !config.dashChannelId || (config.mode === 1)) return; // No se muestra en modo Supervisor
+    const ch = await client.channels.fetch(config.dashChannelId).catch(() => null);
+    if (!ch) return;
+
+    const emb = new EmbedBuilder().setTitle('⏱️ Fichar Asistencia').setDescription(`**Estado:** ${config.isFrozen?'❄️ Cerrado':'🟢 Abierto'}\n\n${listText}`).setColor(config.isFrozen?0x99AAB5:0x5865F2);
+    const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('btn_start').setLabel('ENTRAR').setStyle(3), new ButtonBuilder().setCustomId('btn_stop').setLabel('SALIR').setStyle(4));
+    
+    // Buscar mensaje anterior o enviar nuevo
+    const msgs = await ch.messages.fetch({ limit: 10 }).catch(()=>null);
+    const lastMsg = msgs ? msgs.find(m => m.author.id === client.user.id && m.components.length > 0) : null;
+    if (lastMsg) lastMsg.edit({ embeds: [emb], components: [row] });
+    else ch.send({ embeds: [emb], components: [row] });
+}
+
+async function updateSupervisorDash(gId, listText) {
+    const config = await GuildConfig.findOne({ guildId: gId });
+    if (!config || !config.supervisorChannelId || !config.supervisorDashboardMsgId) return;
+    const ch = await client.channels.fetch(config.supervisorChannelId).catch(() => null);
+    if (!ch) return;
+
+    const emb = new EmbedBuilder().setTitle('👮 Panel Supervisor').setDescription("**Tiempos Activos**\n" + listText + "\n\nUse `!tomar @usuario` para iniciar.").setColor(0xE67E22);
+    
+    try { const m = await ch.messages.fetch(config.supervisorDashboardMsgId); await m.edit({ embeds: [emb], components: [] }); } // SIN BOTONES
+    catch(e) { 
+        const n = await ch.send({ embeds: [emb] }); 
+        config.supervisorDashboardMsgId = n.id; await config.save(); 
     }
-    const emb=new EmbedBuilder().setTitle('🎛️ Dashboard Admin').setDescription(d).setColor(0x2B2D31).setTimestamp();
-    const dis=a.length===0; 
-    const row=new ActionRowBuilder().addComponents(
+}
+
+async function updateLiveAdminDash(gId, listText) {
+    const config = await GuildConfig.findOne({ guildId: gId });
+    if (!config || !config.logChannelId || !config.liveDashboardMsgId) return;
+    const ch = await client.channels.fetch(config.logChannelId).catch(() => null);
+    if (!ch) return;
+
+    const activeCount = (await WorkSession.countDocuments({ guildId: gId, endTime: null }));
+    const dis = activeCount === 0;
+    const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('live_ctl_pause').setLabel('Pausar').setStyle(2).setEmoji('⏸️').setDisabled(dis),
         new ButtonBuilder().setCustomId('live_ctl_accumulate').setLabel('Acumular').setStyle(3).setEmoji('📥').setDisabled(dis),
         new ButtonBuilder().setCustomId('live_ctl_cancel').setLabel('Cancelar').setStyle(4).setEmoji('❌').setDisabled(dis),
         new ButtonBuilder().setCustomId('live_ctl_transfer').setLabel('Transferir').setStyle(1).setEmoji('🔄').setDisabled(dis)
     );
-    try{const m=await ch.messages.fetch(c.liveDashboardMsgId); await m.edit({content:'',embeds:[emb],components:[row]});}catch(e){const n=await ch.send({embeds:[emb],components:[row]});c.liveDashboardMsgId=n.id;await c.save();}
+    const emb = new EmbedBuilder().setTitle('🎛️ Dashboard Admin').setDescription("**Lista Maestra en Vivo**\n" + listText).setColor(0x2B2D31).setTimestamp();
+    try { const m = await ch.messages.fetch(config.liveDashboardMsgId); await m.edit({ content: '', embeds: [emb], components: [row] }); } catch(e) {}
 }
 
-function sendPublicDashboardMsg(ch,gId){ch.send({embeds:[new EmbedBuilder().setTitle('Cargando...')]}).then(()=>updatePublicDash(gId));}
-function refreshAllLiveDashboards(){client.guilds.cache.forEach(g=>updateLiveAdminDash(g.id));}
-async function checkAutoSchedules(){
+async function updateAllDashboards(guildId) {
+    const config = await GuildConfig.findOne({ guildId: guildId });
+    if (!config) return;
+    const guild = await client.guilds.fetch(guildId).catch(()=>null);
+    if (!guild) return;
+
+    const listText = await generateActiveList(guildId, guild);
+
+    await updatePublicDash(guildId, listText);
+    await updateSupervisorDash(guildId, listText);
+    await updateLiveAdminDash(guildId, listText);
+}
+
+// Envíos iniciales
+function sendPublicDashboardMsg(ch, gId) { ch.send({embeds:[new EmbedBuilder().setTitle('Cargando...')]}).then(()=>updateAllDashboards(gId)); }
+async function sendSupervisorDashboardMsg(ch, gId) {
+    const m = await ch.send('Cargando Supervisor...');
+    await GuildConfig.findOneAndUpdate({guildId:gId}, {supervisorDashboardMsgId: m.id});
+    updateAllDashboards(gId);
+}
+
+function updateAllDashboardsGlobal() {
+    client.guilds.cache.forEach(g => updateAllDashboards(g.id));
+}
+
+async function checkAutoSchedules() {
     const cs=await GuildConfig.find({autoCut:{$ne:null},isFrozen:false});
     for(const c of cs){
         const tz=momentTimezone.tz(c.timezone), map={'domingo':'Sunday','lunes':'Monday','martes':'Tuesday','miercoles':'Wednesday','jueves':'Thursday','viernes':'Friday','sabado':'Saturday'};
@@ -592,7 +581,7 @@ async function checkAutoSchedules(){
         if(tz.format('dddd')===map[d]&&tz.format('HH:mm')===c.autoCut.time){
             c.isFrozen=true;await c.save();const a=await WorkSession.find({guildId:c.guildId,endTime:null});const l=await client.channels.fetch(c.logChannelId).catch(()=>null);
             for(const s of a){s.endTime=new Date();await s.save();if(l)l.send({embeds:[new EmbedBuilder().setDescription(`⚠️ Auto-Cierre: <@${s.userId}>`).setColor(0xFFA500)]});}
-            updatePublicDash(c.guildId);updateLiveAdminDash(c.guildId);
+            updateAllDashboards(c.guildId);
         }
     }
 }
